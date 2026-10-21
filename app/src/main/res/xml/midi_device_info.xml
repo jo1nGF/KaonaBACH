@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<devices>
+    <device manufacturer="Kaona" product="B.A.C.H." name="B.A.C.H. Generative Composer">
+        <output-port name="BACH Ch1" />
+        <output-port name="BACH Ch2" />
+        <output-port name="BACH Ch3" />
+        <output-port name="BACH Ch4" />
+    </device>
+</devices>

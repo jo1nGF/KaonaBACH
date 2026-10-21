@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.software.midi" android:required="true"/>
+
+    <application
+        android:name=".BachApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="B.A.C.H."
+        android:supportsRtl="true"
+        android:theme="@style/Theme.KaonaBACH">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.KaonaBACH">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".midi.BachMidiService"
+            android:exported="true"
+            android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.media.midi.MidiDeviceService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.media.midi.MidiDeviceInfo"
+                android:resource="@xml/midi_device_info" />
+        </service>
+    </application>
+</manifest>
