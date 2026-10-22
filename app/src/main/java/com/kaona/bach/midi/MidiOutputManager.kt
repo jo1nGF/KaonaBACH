@@ -12,6 +12,11 @@ class MidiOutputManager {
     private val activeNotes = ConcurrentHashMap<String, NoteOffJob>()
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    companion object {
+        /** Nota usada quando PITCH está desligado (C4). */
+        const val FIXED_NOTE = 60
+    }
+
     data class NoteOffJob(
         val channel: Int,
         val note: Int,
@@ -24,8 +29,25 @@ class MidiOutputManager {
      * @param channel MIDI channel (1-16)
      * @param bpm Current BPM for duration calculation
      */
-    fun sendNoteEvent(event: NoteEvent, channel: Int, bpm: Int) {
-        val key = "${channel}_${event.midiNote}"
+    fun sendNoteEvent(
+        event: NoteEvent,
+        channel: Int,
+        bpm: Int,
+        gateEnabled: Boolean = true,
+        modEnabled: Boolean = true,
+        pitchEnabled: Boolean = true
+    ) {
+        // MOD: CC1 vai antes da nota, para a nota já nascer com a modulação aplicada
+        if (modEnabled) {
+            BachMidiService.sendControlChange(channel, 1, event.modValue)
+        }
+
+        // Sem GATE não há disparo de nota
+        if (!gateEnabled) return
+
+        // PITCH desligado: o gate dispara uma nota fixa (trigger puro)
+        val noteNumber = if (pitchEnabled) event.midiNote else FIXED_NOTE
+        val key = "${channel}_${noteNumber}"
 
         // Kill any existing note on same channel/note
         activeNotes[key]?.let {
@@ -34,20 +56,17 @@ class MidiOutputManager {
         }
 
         // Send note on
-        BachMidiService.sendNoteOn(channel, event.midiNote, event.velocity)
-
-        // Send mod value as CC1 (modulation wheel)
-        BachMidiService.sendControlChange(channel, 1, event.modValue)
+        BachMidiService.sendNoteOn(channel, noteNumber, event.velocity)
 
         // Schedule note off
         val durationMs = ticksToMs(event.durationTicks, bpm)
         val job = scope.launch {
             delay(durationMs)
-            BachMidiService.sendNoteOff(channel, event.midiNote)
+            BachMidiService.sendNoteOff(channel, noteNumber)
             activeNotes.remove(key)
         }
 
-        activeNotes[key] = NoteOffJob(channel, event.midiNote, job)
+        activeNotes[key] = NoteOffJob(channel, noteNumber, job)
     }
 
     /**

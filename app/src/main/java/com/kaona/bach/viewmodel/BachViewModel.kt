@@ -11,6 +11,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+
+/** Sinal de uma saída: [count] sobe a cada emissão (a UI usa para piscar) e [level] é o último valor (0-127). */
+data class SignalState(val count: Int = 0, val level: Int = 0)
 
 data class UiState(
     val isPlaying: Boolean = false,
@@ -31,6 +35,11 @@ data class UiState(
     val midiChannels: IntArray = intArrayOf(1, 2, 3, 4),
     val trackMutes: BooleanArray = booleanArrayOf(false, false, false, false),
     val trackActivity: IntArray = intArrayOf(0, 0, 0, 0),
+    /** outputEnabled[tipo][voz]; tipo 0 = GATE, 1 = MOD, 2 = PITCH */
+    val outputEnabled: List<List<Boolean>> = List(3) { List(4) { true } },
+    val gateSignals: List<SignalState> = List(4) { SignalState() },
+    val modSignals: List<SignalState> = List(4) { SignalState() },
+    val pitchSignals: List<SignalState> = List(4) { SignalState() },
     val breakCharacter: BreakCharacter = BreakCharacter.AUTO,
     val breakBars: Int = 2,
     val isBreakActive: Boolean = false,
@@ -142,6 +151,32 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(trackMutes = mutes)
     }
 
+    /** Liga/desliga uma única saída (tipo 0 = GATE, 1 = MOD, 2 = PITCH) de uma voz. */
+    fun toggleOutput(type: Int, track: Int) {
+        _uiState.update { cur ->
+            cur.copy(
+                outputEnabled = cur.outputEnabled.mapIndexed { t, row ->
+                    if (t == type) row.mapIndexed { i, on -> if (i == track) !on else on } else row
+                }
+            )
+        }
+    }
+
+    /** Liga todas as vozes de um tipo; se já estiverem todas ligadas, desliga todas. */
+    fun toggleOutputRow(type: Int) {
+        _uiState.update { cur ->
+            val target = !cur.outputEnabled[type].all { it }
+            cur.copy(
+                outputEnabled = cur.outputEnabled.mapIndexed { t, row ->
+                    if (t == type) List(row.size) { target } else row
+                }
+            )
+        }
+    }
+
+    private fun List<SignalState>.bump(hits: IntArray, levels: IntArray): List<SignalState> =
+        mapIndexed { i, s -> if (hits[i] > 0) SignalState(s.count + hits[i], levels[i]) else s }
+
     fun setBreakCharacter(character: BreakCharacter) {
         engine.setBreakConfig(BreakConfig(character, _uiState.value.breakBars))
         _uiState.value = _uiState.value.copy(breakCharacter = character)
@@ -211,22 +246,62 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                 val events = engine.processTick()
                 val engineState = engine.getState()
 
-                for (event in events) {
-                    val channel = engineState.midiChannels.getOrElse(event.track) { event.track + 1 }
-                    midiOutput.sendNoteEvent(event, channel, bpm)
+                if (events.isNotEmpty()) {
+                    val enabled = _uiState.value.outputEnabled
+                    val gateHits = IntArray(4)
+                    val gateLevel = IntArray(4)
+                    val modHits = IntArray(4)
+                    val modLevel = IntArray(4)
+                    val pitchHits = IntArray(4)
+                    val pitchLevel = IntArray(4)
+                    val lastNote = IntArray(4) { -1 }
+
+                    for (event in events) {
+                        val track = event.track.coerceIn(0, 3)
+                        val gateOn = enabled[0].getOrElse(track) { true }
+                        val modOn = enabled[1].getOrElse(track) { true }
+                        val pitchOn = enabled[2].getOrElse(track) { true }
+                        val channel = engineState.midiChannels.getOrElse(event.track) { event.track + 1 }
+
+                        midiOutput.sendNoteEvent(event, channel, bpm, gateOn, modOn, pitchOn)
+
+                        if (gateOn) {
+                            gateHits[track]++
+                            gateLevel[track] = event.velocity
+                            lastNote[track] = event.midiNote
+                            if (pitchOn) {
+                                pitchHits[track]++
+                                pitchLevel[track] = event.midiNote
+                            }
+                        }
+                        if (modOn) {
+                            modHits[track]++
+                            modLevel[track] = event.modValue
+                        }
+                    }
+
+                    _uiState.update { cur ->
+                        val activity = cur.trackActivity.copyOf()
+                        for (t in 0..3) if (lastNote[t] >= 0) activity[t] = lastNote[t]
+                        cur.copy(
+                            gateSignals = cur.gateSignals.bump(gateHits, gateLevel),
+                            modSignals = cur.modSignals.bump(modHits, modLevel),
+                            pitchSignals = cur.pitchSignals.bump(pitchHits, pitchLevel),
+                            trackActivity = activity
+                        )
+                    }
                 }
 
                 if (engineState.currentTick % ppqn == 0L) {
-                    val activity = _uiState.value.trackActivity.copyOf()
-                    events.forEach { activity[it.track] = it.midiNote }
                     withContext(Dispatchers.Main) {
-                        _uiState.value = _uiState.value.copy(
-                            currentBar = engineState.currentBar,
-                            currentBeat = engineState.currentBeat,
-                            isBreakActive = engineState.isBreakActive,
-                            trackActivity = activity,
-                            isMidiConnected = BachMidiService.isConnected
-                        )
+                        _uiState.update {
+                            it.copy(
+                                currentBar = engineState.currentBar,
+                                currentBeat = engineState.currentBeat,
+                                isBreakActive = engineState.isBreakActive,
+                                isMidiConnected = BachMidiService.isConnected
+                            )
+                        }
                     }
                 }
 

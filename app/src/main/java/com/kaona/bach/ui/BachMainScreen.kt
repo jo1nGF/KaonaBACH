@@ -32,7 +32,7 @@ fun BachMainScreen(viewModel: BachViewModel) {
         Spacer(modifier = Modifier.height(4.dp))
 
         // CV Input buttons row
-        CVInputButtonsRow(state = state, viewModel = viewModel)
+        CVInputButtonsRow(state = state)
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -161,7 +161,10 @@ fun BachMainScreen(viewModel: BachViewModel) {
         OutputJacksSection(
             channels = state.midiChannels,
             trackMutes = state.trackMutes,
-            trackActivity = state.trackActivity,
+            outputEnabled = state.outputEnabled,
+            signals = listOf(state.gateSignals, state.modSignals, state.pitchSignals),
+            onToggleOutput = { type, track -> viewModel.toggleOutput(type, track) },
+            onToggleRow = { viewModel.toggleOutputRow(it) },
             onToggleMute = { viewModel.toggleTrackMute(it) }
         )
 
