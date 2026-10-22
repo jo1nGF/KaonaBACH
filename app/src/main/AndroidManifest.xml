@@ -30,7 +30,7 @@
                 <action android:name="android.media.midi.MidiDeviceService" />
             </intent-filter>
             <meta-data
-                android:name="android.media.midi.MidiDeviceInfo"
+                android:name="android.media.midi.MidiDeviceService"
                 android:resource="@xml/midi_device_info" />
         </service>
     </application>
