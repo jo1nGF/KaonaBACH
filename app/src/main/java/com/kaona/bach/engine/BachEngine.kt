@@ -240,9 +240,12 @@ class BachEngine {
             events.addAll(generateEventsAtTick(currentTick))
         }
 
+        // Filter muted tracks
+        val audible = events.filter { !state.trackMutes[it.track] }
+
         // Apply humanization
         if (state.params.humanize > 0f) {
-            return events.map { event ->
+            return audible.map { event ->
                 event.copy(
                     velocity = RhythmUtils.humanizeVelocity(event.velocity, state.params.humanize, random),
                     modValue = RhythmUtils.humanizeVelocity(event.modValue, state.params.humanize * 0.5f, random)
@@ -250,8 +253,7 @@ class BachEngine {
             }
         }
 
-        // Filter muted tracks
-        return events.filter { !state.trackMutes[it.track] }
+        return audible
     }
 
     private fun generateEventsAtTick(tick: Long): List<NoteEvent> {
