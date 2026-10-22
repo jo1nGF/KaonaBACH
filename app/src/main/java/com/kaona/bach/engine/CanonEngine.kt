@@ -321,6 +321,7 @@ class CanonEngine : CompositionEngine {
             1 -> -7  // Down a 5th (in scale degrees ~4 down)
             2 -> -12 // Down an octave
             3 -> -19 // Down an octave and 5th
+            else -> 0
         }
     }
 

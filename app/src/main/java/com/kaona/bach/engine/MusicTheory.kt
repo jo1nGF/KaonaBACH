@@ -63,6 +63,12 @@ enum class Scale(val intervals: IntArray, val displayName: String) {
     }
 }
 
+/** Alias used by the engines: semitone offsets of the scale degrees. */
+val Scale.degrees: IntArray get() = intervals
+
+/** Alias used by the engines: pitch class (0-11) of the note name. */
+val NoteName.midiValue: Int get() = midiBase
+
 enum class ChordType(val intervals: IntArray, val displayName: String) {
     MAJOR(intArrayOf(0, 4, 7), "Maj"),
     MINOR(intArrayOf(0, 3, 7), "Min"),
@@ -165,12 +171,22 @@ object RhythmUtils {
 
     val STANDARD_DURATIONS = intArrayOf(WHOLE, HALF, DOTTED_QUARTER, QUARTER, DOTTED_EIGHTH, EIGHTH, SIXTEENTH)
 
-    fun humanizeTiming(tickPosition: Int, amount: Float, random: java.util.Random): Int {
+    private val defaultRandom = java.util.Random()
+
+    fun humanizeTiming(
+        tickPosition: Long,
+        amount: Float,
+        random: java.util.Random = defaultRandom
+    ): Long {
         val maxShift = (SIXTEENTH * amount).toInt()
-        return tickPosition + random.nextInt(maxShift * 2 + 1) - maxShift
+        return (tickPosition + random.nextInt(maxShift * 2 + 1) - maxShift).coerceAtLeast(0L)
     }
 
-    fun humanizeVelocity(velocity: Int, amount: Float, random: java.util.Random): Int {
+    fun humanizeVelocity(
+        velocity: Int,
+        amount: Float,
+        random: java.util.Random = defaultRandom
+    ): Int {
         val maxShift = (30 * amount).toInt()
         return (velocity + random.nextInt(maxShift * 2 + 1) - maxShift).coerceIn(1, 127)
     }

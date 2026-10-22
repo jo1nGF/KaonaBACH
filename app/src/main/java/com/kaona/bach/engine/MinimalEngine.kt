@@ -183,7 +183,7 @@ class MinimalEngine : CompositionEngine {
                 for (v in 1 until 4) {
                     voicePhases[v] += shiftAmount * v
                     if (voicePhases[v] >= currentPattern.size) {
-                        voicePhases[v] -= currentPattern.size
+                        voicePhases[v] = voicePhases[v] - currentPattern.size.toFloat()
                     }
                 }
             }

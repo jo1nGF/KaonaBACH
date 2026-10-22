@@ -34,10 +34,10 @@ class BachMidiService : MidiDeviceService() {
         super.onDeviceStatusChanged(status)
         status?.let {
             for (i in 0 until 4) {
-                val isOpen = it.isOutputPortOpen(i)
+                val isOpen = it.getOutputPortOpenCount(i) > 0
                 Log.d(TAG, "Output port $i open: $isOpen")
             }
-            isConnected = (0 until 4).any { i -> it.isOutputPortOpen(i) }
+            isConnected = (0 until 4).any { i -> it.getOutputPortOpenCount(i) > 0 }
         }
     }
 

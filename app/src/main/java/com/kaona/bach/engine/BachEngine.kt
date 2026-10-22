@@ -295,7 +295,7 @@ class BachEngine {
             BreakCharacter.SILENCE -> { /* No events */ }
             BreakCharacter.AGITATION -> {
                 // Rapid, dense rhythmic activity
-                for (tick in 0 until breakDuration step RhythmUtils.SIXTEENTH.toLong()) {
+                for (tick in 0L until breakDuration.toLong() step RhythmUtils.SIXTEENTH.toLong()) {
                     for (track in 0..3) {
                         if (random.nextFloat() < 0.7f) {
                             val note = lastGeneratedNotes[track] + random.nextInt(13) - 6
@@ -312,7 +312,7 @@ class BachEngine {
             }
             BreakCharacter.FRAGMENT -> {
                 // Short fragmented bursts
-                for (tick in 0 until breakDuration step RhythmUtils.EIGHTH.toLong()) {
+                for (tick in 0L until breakDuration.toLong() step RhythmUtils.EIGHTH.toLong()) {
                     val track = random.nextInt(4)
                     if (random.nextFloat() < 0.4f) {
                         events.add(NoteEvent(track, lastGeneratedNotes[track], random.nextInt(60) + 40, RhythmUtils.SIXTEENTH, breakStartTick + tick))
@@ -321,7 +321,7 @@ class BachEngine {
             }
             BreakCharacter.PULSE -> {
                 // Regular rhythmic pulse on all voices
-                for (tick in 0 until breakDuration step RhythmUtils.QUARTER.toLong()) {
+                for (tick in 0L until breakDuration.toLong() step RhythmUtils.QUARTER.toLong()) {
                     for (track in 0..3) {
                         events.add(NoteEvent(track, lastGeneratedNotes[track], 100, RhythmUtils.EIGHTH, breakStartTick + tick))
                     }
@@ -330,7 +330,7 @@ class BachEngine {
             BreakCharacter.EROSION -> {
                 // Gradually thinning out
                 var prob = 0.8f
-                for (tick in 0 until breakDuration step RhythmUtils.EIGHTH.toLong()) {
+                for (tick in 0L until breakDuration.toLong() step RhythmUtils.EIGHTH.toLong()) {
                     for (track in 0..3) {
                         if (random.nextFloat() < prob) {
                             events.add(NoteEvent(track, lastGeneratedNotes[track], (100 * prob).toInt(), RhythmUtils.EIGHTH, breakStartTick + tick))
@@ -342,7 +342,7 @@ class BachEngine {
             BreakCharacter.EXPANSION -> {
                 // Growing outward in register and density
                 var spread = 0
-                for (tick in 0 until breakDuration step RhythmUtils.EIGHTH.toLong()) {
+                for (tick in 0L until breakDuration.toLong() step RhythmUtils.EIGHTH.toLong()) {
                     for (track in 0..3) {
                         val note = lastGeneratedNotes[track] + (if (track % 2 == 0) spread else -spread)
                         events.add(NoteEvent(track, note.coerceIn(24, 108), 80 + spread, RhythmUtils.QUARTER, breakStartTick + tick))
