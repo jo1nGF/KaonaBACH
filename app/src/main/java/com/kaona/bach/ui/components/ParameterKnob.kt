@@ -34,6 +34,12 @@ fun ParameterKnob(
 ) {
     val colors = BachTheme.colors
 
+    // O pointerInput(Unit) só é criado uma vez; sem isso ele guardaria o valor
+    // e o callback da primeira composição e o knob travaria/voltaria ao arrastar.
+    val currentValue by rememberUpdatedState(value)
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    var dragValue by remember { mutableStateOf(value) }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.width(size.dp + 20.dp)
@@ -53,11 +59,13 @@ fun ParameterKnob(
             modifier = Modifier
                 .size(size.dp)
                 .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
+                    detectDragGestures(
+                        onDragStart = { dragValue = currentValue }
+                    ) { change, dragAmount ->
                         change.consume()
-                        val delta = -dragAmount.y / 300f
-                        val newValue = (value + delta).coerceIn(0f, 1f)
-                        onValueChange(newValue)
+                        // Arrastar para cima aumenta, para baixo diminui
+                        dragValue = (dragValue - dragAmount.y / 300f).coerceIn(0f, 1f)
+                        currentOnValueChange(dragValue)
                     }
                 }
         ) {
