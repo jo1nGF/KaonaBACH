@@ -174,15 +174,35 @@ fun BachMainScreen(viewModel: BachViewModel) {
             SettingsPanel(
                 rootNote = state.rootNote,
                 scale = state.scale,
+                ornaments = state.ornaments,
                 breakCharacter = state.breakCharacter,
                 breakBars = state.breakBars,
                 midiChannels = state.midiChannels,
                 onRootChange = { viewModel.setRoot(it) },
                 onScaleChange = { viewModel.setScale(it) },
+                onOrnamentsChange = { viewModel.setOrnaments(it) },
                 onBreakCharChange = { viewModel.setBreakCharacter(it) },
                 onBreakBarsChange = { viewModel.setBreakBars(it) },
                 onMidiChannelChange = { track, ch -> viewModel.setMidiChannel(track, ch) }
             )
+        }
+
+        if (state.showSequence) {
+            SequencePanel(
+                sequence = state.sequence,
+                language = state.currentLanguage,
+                isPlaying = state.isPlaying,
+                playingStep = state.playingStep,
+                currentChord = state.currentChord,
+                onStepChange = { index, step -> viewModel.updateSequenceStep(index, step) },
+                onEnabledChange = { viewModel.setSequenceEnabled(it) },
+                onClear = { viewModel.clearSequence() },
+                onLoadFactory = { form, speed -> viewModel.loadFactorySequence(form, speed) },
+                onLoadUser = { viewModel.loadUserSequence(it) },
+                onSaveUser = { viewModel.saveUserSequence(it) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         if (state.showPresets) {
@@ -204,7 +224,8 @@ fun BachMainScreen(viewModel: BachViewModel) {
 
         BottomBar(
             isMidiConnected = state.isMidiConnected,
-            onSettingsToggle = { viewModel.toggleSettings() }
+            onSettingsToggle = { viewModel.toggleSettings() },
+            onSequenceToggle = { viewModel.toggleSequence() }
         )
     }
 }

@@ -83,7 +83,8 @@ data class EngineState(
     val params: BachParams = BachParams(),
     val rootNote: NoteName = NoteName.C,
     val scale: Scale = Scale.MAJOR,
-    val progression: HarmonicProgression = HarmonicProgression(),
+    val sequence: HarmonicSequence = HarmonicSequence(),   // Progressão harmônica (SEQUENCE)
+    val ornaments: Float = 0f,                              // 0.0-1.0: quantidade de ornamentos (OFF-100%)
     val breakConfig: BreakConfig = BreakConfig(),
     val isBreakActive: Boolean = false,
     val midiChannels: IntArray = intArrayOf(1, 2, 3, 4), // MIDI channels for 4 voices
@@ -97,6 +98,8 @@ data class EngineState(
  */
 class BachEngine {
     private val random = Random()
+    private val harmony = HarmonyProcessor()
+    private val ornamentProcessor = OrnamentProcessor(random)
     @Volatile
     private var state = EngineState()
     private val eventBuffer = mutableListOf<NoteEvent>()
@@ -122,7 +125,27 @@ class BachEngine {
     fun getState(): EngineState = state
 
     @Synchronized
+    fun setOrnaments(amount: Float) {
+        state = state.copy(ornaments = amount.coerceIn(0f, 1f))
+    }
+
+    @Synchronized
+    fun setSequence(sequence: HarmonicSequence) {
+        state = state.copy(sequence = sequence)
+        harmony.invalidate()
+    }
+
+    /** Acorde que toca em [tick] (para a tela HARMONY); null se a SEQUENCE estiver inativa. */
+    fun chordDisplayAt(tick: Long): ChordDisplay? {
+        val st = state
+        if (!st.sequence.isActive) return null
+        val pos = HarmonyEngine.locate(st.sequence, tick) ?: return null
+        return ChordDisplay(pos.index, HarmonyEngine.label(st.sequence.steps[pos.index], st.rootNote, st.scale))
+    }
+
+    @Synchronized
     fun setState(newState: EngineState) {
+        harmony.invalidate()
         state = newState
     }
 
@@ -183,12 +206,15 @@ class BachEngine {
     @Synchronized
     fun play() {
         state = state.copy(isPlaying = true, currentTick = 0, currentBar = 0, currentBeat = 0)
+        harmony.reset()
+        ornamentProcessor.clear()
         resetLanguageState()
     }
 
     @Synchronized
     fun stop() {
         state = state.copy(isPlaying = false)
+        ornamentProcessor.clear()
         eventBuffer.clear()
         activeNotes.forEach { it.clear() }
     }
@@ -259,9 +285,15 @@ class BachEngine {
         // Filter muted tracks
         val audible = events.filter { !state.trackMutes[it.track] }
 
+        // Harmonia (SEQUENCE) e ornamentos; as notas agendadas dos ornamentos saem quando o tick chega
+        val harmonized = harmony.apply(audible, currentTick, state)
+        val ornamented = ornamentProcessor.process(harmonized, currentTick, state)
+        val due = ornamentProcessor.takeDue(currentTick).filter { !state.trackMutes[it.track] }
+        val finalEvents = if (due.isEmpty()) ornamented else ornamented + due
+
         // Apply humanization
         if (state.params.humanize > 0f) {
-            return audible.map { event ->
+            return finalEvents.map { event ->
                 event.copy(
                     velocity = RhythmUtils.humanizeVelocity(event.velocity, state.params.humanize, random),
                     modValue = RhythmUtils.humanizeVelocity(event.modValue, state.params.humanize * 0.5f, random)
@@ -269,7 +301,7 @@ class BachEngine {
             }
         }
 
-        return audible
+        return finalEvents
     }
 
     private fun generateEventsAtTick(tick: Long): List<NoteEvent> {

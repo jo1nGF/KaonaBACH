@@ -25,7 +25,10 @@ data class Preset(
     val humanize: Float = 0.0f,
     val midiChannels: List<Int> = listOf(1, 2, 3, 4),
     val breakCharacter: String = "AUTO",
-    val breakBars: Int = 2
+    val breakBars: Int = 2,
+    val ornaments: Float = 0f,
+    val sequence: String = "",
+    val sequenceEnabled: Boolean = true
 )
 
 class PresetManager(private val context: Context) {
@@ -46,6 +49,13 @@ class PresetManager(private val context: Context) {
             null
         }
     }
+
+    /** Slots de usuário da SEQUENCE (progressões salvas à parte dos presets). */
+    fun saveUserSequence(slot: Int, encoded: String) {
+        prefs.edit().putString("sequence_$slot", encoded).apply()
+    }
+
+    fun loadUserSequence(slot: Int): String? = prefs.getString("sequence_$slot", null)
 
     fun getAllPresets(): List<Preset> {
         val presets = mutableListOf<Preset>()
@@ -75,7 +85,9 @@ class PresetManager(private val context: Context) {
             breakConfig = BreakConfig(
                 character = try { BreakCharacter.valueOf(preset.breakCharacter) } catch (e: Exception) { BreakCharacter.AUTO },
                 bars = preset.breakBars
-            )
+            ),
+            ornaments = preset.ornaments,
+            sequence = HarmonicSequence.decode(preset.sequence, preset.sequenceEnabled)
         )
     }
 
@@ -97,7 +109,10 @@ class PresetManager(private val context: Context) {
             humanize = state.params.humanize,
             midiChannels = state.midiChannels.toList(),
             breakCharacter = state.breakConfig.character.name,
-            breakBars = state.breakConfig.bars
+            breakBars = state.breakConfig.bars,
+            ornaments = state.ornaments,
+            sequence = state.sequence.encode(),
+            sequenceEnabled = state.sequence.enabled
         )
     }
 

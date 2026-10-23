@@ -30,11 +30,13 @@ import com.kaona.bach.ui.theme.BachTheme
 fun SettingsPanel(
     rootNote: NoteName,
     scale: Scale,
+    ornaments: Float,
     breakCharacter: BreakCharacter,
     breakBars: Int,
     midiChannels: IntArray,
     onRootChange: (NoteName) -> Unit,
     onScaleChange: (Scale) -> Unit,
+    onOrnamentsChange: (Float) -> Unit,
     onBreakCharChange: (BreakCharacter) -> Unit,
     onBreakBarsChange: (Int) -> Unit,
     onMidiChannelChange: (Int, Int) -> Unit
@@ -147,6 +149,51 @@ fun SettingsPanel(
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Ornaments (appoggiatura, mordente, turn, trinado; flams no Groove)
+        Text(
+            text = "ORNAMENTS",
+            color = colors.textSecondary,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf("OFF" to 0f, "10%" to 0.1f, "25%" to 0.25f, "50%" to 0.5f, "75%" to 0.75f, "100%" to 1f)
+                .forEach { (label, value) ->
+                    val isSelected = kotlin.math.abs(ornaments - value) < 0.01f
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(
+                                if (isSelected) colors.accent.copy(alpha = 0.25f)
+                                else colors.surface
+                            )
+                            .border(
+                                0.5.dp,
+                                if (isSelected) colors.accent else colors.surfaceVariant,
+                                RoundedCornerShape(4.dp)
+                            )
+                            .clickable { onOrnamentsChange(value) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) colors.accent else colors.textSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
         }
 
         Spacer(modifier = Modifier.height(8.dp))

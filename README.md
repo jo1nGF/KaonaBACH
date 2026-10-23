@@ -131,3 +131,8 @@ O B.A.C.H. original é um produto comercial disponível em: https://www.kaona.fr
 - Design original: **Kaona** (https://www.kaona.fr)
 - Conceito: Módulo Eurorack B.A.C.H. (4-voice generative composition generator)
 - Port Android: Projeto educacional
+
+## ORNAMENTS e SEQUENCE
+
+- **ORNAMENTS** (⚙ Settings → ORNAMENTS: OFF a 100%): adiciona appoggiaturas, mordentes, turns e trinados conforme o andamento, a duração da nota e a posição métrica. Em GROOVE e GROOVE MIX gera flams.
+- **SEQUENCE** (botão ♪ SEQ): progressão harmônica de até 64 posições (raiz, qualidade, duração e inversão/VOICING). Notas estruturais vão para o acorde; notas de passagem vão para a escala ou o acorde. FUGUE e GROOVE ignoram a progressão. Há 32 formas de fábrica (QUICK/NORMAL/LONG) e 128 slots de usuário.

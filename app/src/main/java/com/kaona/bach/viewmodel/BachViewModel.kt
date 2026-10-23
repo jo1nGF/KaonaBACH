@@ -57,7 +57,12 @@ data class UiState(
     val presetName: String = "Init",
     val isMidiConnected: Boolean = false,
     val showSettings: Boolean = false,
-    val showPresets: Boolean = false
+    val showPresets: Boolean = false,
+    val ornaments: Float = 0f,
+    val sequence: HarmonicSequence = HarmonicSequence(),
+    val currentChord: String = "",
+    val playingStep: Int = -1,
+    val showSequence: Boolean = false
 )
 
 class BachViewModel(application: Application) : AndroidViewModel(application) {
@@ -94,7 +99,12 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isPlaying) return
         midiOutput.allNotesOff()
         engine.play()
-        _uiState.value = _uiState.value.copy(isPlaying = true)
+        val chord = engine.chordDisplayAt(0)
+        _uiState.value = _uiState.value.copy(
+            isPlaying = true,
+            currentChord = chord?.label ?: "",
+            playingStep = chord?.step ?: -1
+        )
         BachMidiService.sendStart()
         startClock()
     }
@@ -109,7 +119,9 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
             isPlaying = false,
             currentBar = 0,
             currentBeat = 0,
-            trackActivity = intArrayOf(0, 0, 0, 0)
+            trackActivity = intArrayOf(0, 0, 0, 0),
+            currentChord = "",
+            playingStep = -1
         )
     }
 
@@ -222,6 +234,45 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(showSettings = !_uiState.value.showSettings)
     }
 
+    fun toggleSequence() {
+        _uiState.update { it.copy(showSequence = !it.showSequence) }
+    }
+
+    fun setOrnaments(value: Float) {
+        engine.setOrnaments(value)
+        _uiState.update { it.copy(ornaments = value) }
+    }
+
+    private fun applySequence(sequence: HarmonicSequence) {
+        engine.setSequence(sequence)
+        _uiState.update { it.copy(sequence = sequence) }
+    }
+
+    fun setSequenceEnabled(enabled: Boolean) {
+        applySequence(_uiState.value.sequence.copy(enabled = enabled))
+    }
+
+    fun updateSequenceStep(index: Int, step: ChordStep) {
+        applySequence(_uiState.value.sequence.withStep(index, step))
+    }
+
+    fun clearSequence() {
+        applySequence(HarmonicSequence(enabled = _uiState.value.sequence.enabled))
+    }
+
+    fun loadFactorySequence(form: Int, speed: Int) {
+        applySequence(FactorySequences.build(form, speed))
+    }
+
+    fun saveUserSequence(slot: Int) {
+        presetManager.saveUserSequence(slot, _uiState.value.sequence.encode())
+    }
+
+    fun loadUserSequence(slot: Int) {
+        val encoded = presetManager.loadUserSequence(slot) ?: return
+        applySequence(HarmonicSequence.decode(encoded, true))
+    }
+
     fun togglePresets() {
         _uiState.value = _uiState.value.copy(showPresets = !_uiState.value.showPresets)
     }
@@ -254,7 +305,9 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
             breakCharacter = try { BreakCharacter.valueOf(preset.breakCharacter) } catch (_: Exception) { BreakCharacter.AUTO },
             breakBars = preset.breakBars,
             presetIndex = preset.index,
-            presetName = preset.name
+            presetName = preset.name,
+            ornaments = preset.ornaments,
+            sequence = state.sequence
         )
     }
 
@@ -339,9 +392,14 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 if (engineState.currentTick % ppqn == 0L) {
+                    // Acorde da próxima batida (as trocas de acorde caem sempre em inícios de tempo)
+                    val chord = engine.chordDisplayAt(engineState.currentTick)
+
                     // StateFlow é thread-safe: não precisa (nem deve) esperar a thread principal
                     _uiState.update {
                         it.copy(
+                            currentChord = chord?.label ?: "",
+                            playingStep = chord?.step ?: -1,
                             currentBar = engineState.currentBar,
                             currentBeat = engineState.currentBeat,
                             isBreakActive = engineState.isBreakActive,

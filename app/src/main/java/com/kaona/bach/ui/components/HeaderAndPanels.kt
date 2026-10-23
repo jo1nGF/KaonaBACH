@@ -112,7 +112,8 @@ fun LanguageSelector(
 @Composable
 fun BottomBar(
     isMidiConnected: Boolean,
-    onSettingsToggle: () -> Unit
+    onSettingsToggle: () -> Unit,
+    onSequenceToggle: () -> Unit = {}
 ) {
     val colors = BachTheme.colors
 
@@ -150,6 +151,24 @@ fun BottomBar(
         )
 
         Spacer(modifier = Modifier.weight(1f))
+
+        // Sequence button
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(colors.surfaceVariant)
+                .clickable(onClick = onSequenceToggle)
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            Text(
+                text = "♪ SEQ",
+                color = colors.textPrimary,
+                fontSize = 10.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.width(6.dp))
 
         // Settings button
         Box(
