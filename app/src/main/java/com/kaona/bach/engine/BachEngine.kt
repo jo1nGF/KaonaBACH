@@ -97,6 +97,7 @@ data class EngineState(
  */
 class BachEngine {
     private val random = Random()
+    @Volatile
     private var state = EngineState()
     private val eventBuffer = mutableListOf<NoteEvent>()
     private var activeNotes = Array(4) { mutableListOf<NoteEvent>() }
@@ -120,10 +121,12 @@ class BachEngine {
 
     fun getState(): EngineState = state
 
+    @Synchronized
     fun setState(newState: EngineState) {
         state = newState
     }
 
+    @Synchronized
     fun updateParam(param: String, value: Float) {
         state = when (param) {
             "material" -> state.copy(params = state.params.copy(material = value))
@@ -138,23 +141,28 @@ class BachEngine {
         }
     }
 
+    @Synchronized
     fun setLanguage(language: CompositionalLanguage) {
         state = state.copy(language = language)
         resetLanguageState()
     }
 
+    @Synchronized
     fun setBpm(bpm: Int) {
         state = state.copy(bpm = bpm.coerceIn(30, 300))
     }
 
+    @Synchronized
     fun setScale(scale: Scale) {
         state = state.copy(scale = scale)
     }
 
+    @Synchronized
     fun setRoot(root: NoteName) {
         state = state.copy(rootNote = root)
     }
 
+    @Synchronized
     fun setMidiChannel(track: Int, channel: Int) {
         if (track in 0..3 && channel in 1..16) {
             val channels = state.midiChannels.copyOf()
@@ -163,6 +171,7 @@ class BachEngine {
         }
     }
 
+    @Synchronized
     fun toggleTrackMute(track: Int) {
         if (track in 0..3) {
             val mutes = state.trackMutes.copyOf()
@@ -171,17 +180,20 @@ class BachEngine {
         }
     }
 
+    @Synchronized
     fun play() {
         state = state.copy(isPlaying = true, currentTick = 0, currentBar = 0, currentBeat = 0)
         resetLanguageState()
     }
 
+    @Synchronized
     fun stop() {
         state = state.copy(isPlaying = false)
         eventBuffer.clear()
         activeNotes.forEach { it.clear() }
     }
 
+    @Synchronized
     fun reset() {
         stop()
         state = state.copy(currentTick = 0, currentBar = 0, currentBeat = 0)
@@ -189,17 +201,20 @@ class BachEngine {
         resetLanguageState()
     }
 
+    @Synchronized
     fun triggerBreak() {
         state = state.copy(isBreakActive = true)
         breakStartTick = state.currentTick
         breakEvents = generateBreakEvents()
     }
 
+    @Synchronized
     fun releaseBreak() {
         state = state.copy(isBreakActive = false)
         breakEvents.clear()
     }
 
+    @Synchronized
     fun setBreakConfig(config: BreakConfig) {
         state = state.copy(breakConfig = config)
     }
@@ -208,6 +223,7 @@ class BachEngine {
      * Called on each clock tick to generate new events.
      * Returns list of NoteEvents to be sent as MIDI.
      */
+    @Synchronized
     fun processTick(): List<NoteEvent> {
         if (!state.isPlaying) return emptyList()
 

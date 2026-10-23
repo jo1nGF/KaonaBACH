@@ -1,38 +1,51 @@
 package com.kaona.bach.midi
 
 import com.kaona.bach.engine.NoteEvent
-import kotlinx.coroutines.*
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Manages MIDI output, handling note on/off timing and channel routing.
+ * Saída MIDI: envia Note On/CC e fecha cada nota (Note Off) no tick certo.
+ *
+ * Os Note Off são conferidos pelo próprio clock (onTick), em vez de uma corrotina por nota.
+ * Assim a duração das notas tem precisão de tick, acompanha mudanças de BPM e não gera
+ * trabalho extra nem jitter no agendador de threads.
  */
 class MidiOutputManager {
 
-    private val activeNotes = ConcurrentHashMap<String, NoteOffJob>()
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val lock = Any()
+    private val pending = ArrayList<PendingOff>()
+    private var currentTick = 0L
 
     companion object {
         /** Nota usada quando PITCH está desligado (C4). */
         const val FIXED_NOTE = 60
     }
 
-    data class NoteOffJob(
-        val channel: Int,
-        val note: Int,
-        val job: Job
-    )
+    private class PendingOff(val channel: Int, val note: Int, val offTick: Long)
+
+    /** Chamado pelo clock a cada tick: envia os Note Off que já venceram. */
+    fun onTick(tick: Long) {
+        synchronized(lock) {
+            currentTick = tick
+            var i = 0
+            while (i < pending.size) {
+                val p = pending[i]
+                if (p.offTick <= tick) {
+                    BachMidiService.sendNoteOff(p.channel, p.note)
+                    pending.removeAt(i)
+                } else {
+                    i++
+                }
+            }
+        }
+    }
 
     /**
-     * Send a NoteEvent as MIDI, with automatic note-off scheduling.
-     * @param event The note event to send
-     * @param channel MIDI channel (1-16)
-     * @param bpm Current BPM for duration calculation
+     * Envia um NoteEvent como MIDI.
+     * @param channel canal MIDI (1-16)
      */
     fun sendNoteEvent(
         event: NoteEvent,
         channel: Int,
-        bpm: Int,
         gateEnabled: Boolean = true,
         modEnabled: Boolean = true,
         pitchEnabled: Boolean = true
@@ -47,47 +60,34 @@ class MidiOutputManager {
 
         // PITCH desligado: o gate dispara uma nota fixa (trigger puro)
         val noteNumber = if (pitchEnabled) event.midiNote else FIXED_NOTE
-        val key = "${channel}_${noteNumber}"
 
-        // Kill any existing note on same channel/note
-        activeNotes[key]?.let {
-            BachMidiService.sendNoteOff(it.channel, it.note)
-            it.job.cancel()
+        synchronized(lock) {
+            // Mesma nota ainda soando no mesmo canal: fecha antes de retocar
+            var i = 0
+            while (i < pending.size) {
+                val p = pending[i]
+                if (p.channel == channel && p.note == noteNumber) {
+                    BachMidiService.sendNoteOff(p.channel, p.note)
+                    pending.removeAt(i)
+                } else {
+                    i++
+                }
+            }
+
+            BachMidiService.sendNoteOn(channel, noteNumber, event.velocity)
+            pending.add(PendingOff(channel, noteNumber, currentTick + event.durationTicks.coerceAtLeast(1)))
         }
-
-        // Send note on
-        BachMidiService.sendNoteOn(channel, noteNumber, event.velocity)
-
-        // Schedule note off
-        val durationMs = ticksToMs(event.durationTicks, bpm)
-        val job = scope.launch {
-            delay(durationMs)
-            BachMidiService.sendNoteOff(channel, noteNumber)
-            activeNotes.remove(key)
-        }
-
-        activeNotes[key] = NoteOffJob(channel, noteNumber, job)
     }
 
-    /**
-     * Convert tick duration to milliseconds based on BPM
-     * Using 96 PPQN (Pulses Per Quarter Note)
-     */
-    private fun ticksToMs(ticks: Int, bpm: Int): Long {
-        val msPerQuarter = 60000.0 / bpm
-        val msPerTick = msPerQuarter / 96.0
-        return (ticks * msPerTick).toLong()
-    }
-
-    /**
-     * Send all notes off on all channels and cancel pending note-offs
-     */
+    /** Fecha todas as notas pendentes e manda All Notes Off em todos os canais. */
     fun allNotesOff() {
-        activeNotes.values.forEach { noteOff ->
-            BachMidiService.sendNoteOff(noteOff.channel, noteOff.note)
-            noteOff.job.cancel()
+        synchronized(lock) {
+            for (p in pending) {
+                BachMidiService.sendNoteOff(p.channel, p.note)
+            }
+            pending.clear()
+            currentTick = 0L
         }
-        activeNotes.clear()
         for (ch in 1..16) {
             BachMidiService.sendAllNotesOff(ch)
         }
@@ -95,6 +95,5 @@ class MidiOutputManager {
 
     fun destroy() {
         allNotesOff()
-        scope.cancel()
     }
 }

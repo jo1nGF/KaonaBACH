@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,8 +30,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kaona.bach.ui.theme.BachTheme
+import com.kaona.bach.viewmodel.SignalSnapshot
 import com.kaona.bach.viewmodel.SignalState
 import com.kaona.bach.viewmodel.UiState
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
 private val NOTE_NAMES = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
@@ -60,8 +64,9 @@ fun rememberSignalGlow(signalCount: Int, decayMillis: Int = 260): State<Float> {
  * (muda na hora ao girar o knob) e todos piscam a cada gate emitido.
  */
 @Composable
-fun CVInputButtonsRow(state: UiState) {
+fun CVInputButtonsRow(state: UiState, signals: StateFlow<SignalSnapshot>) {
     val colors = BachTheme.colors
+    val snapshot by signals.collectAsState()
 
     val leds = listOf(
         Triple("MAT", colors.ledRed, state.material),
@@ -74,7 +79,7 @@ fun CVInputButtonsRow(state: UiState) {
         Triple("HUM", colors.ledPink, state.humanize),
     )
 
-    val gateHits = state.gateSignals.sumOf { it.count }
+    val gateHits = snapshot.gate.sumOf { it.count }
     val flash = rememberSignalGlow(gateHits, 240)
 
     Row(
@@ -148,13 +153,15 @@ fun OutputJacksSection(
     channels: IntArray,
     trackMutes: BooleanArray,
     outputEnabled: List<List<Boolean>>,
-    signals: List<List<SignalState>>,
+    signals: StateFlow<SignalSnapshot>,
     onToggleOutput: (Int, Int) -> Unit,
     onToggleRow: (Int) -> Unit,
     onToggleMute: (Int) -> Unit
 ) {
     val colors = BachTheme.colors
     val haptic = LocalHapticFeedback.current
+    val snapshot by signals.collectAsState()
+    val signalRows = listOf(snapshot.gate, snapshot.mod, snapshot.pitch)
 
     val rows = listOf(
         Triple("GATE", colors.gate, 0),
@@ -252,7 +259,7 @@ fun OutputJacksSection(
                 for (track in 0..3) {
                     val enabled = rowEnabled.getOrElse(track) { true }
                     val muted = trackMutes.getOrElse(track) { false }
-                    val signal = signals.getOrElse(type) { emptyList() }
+                    val signal = signalRows.getOrElse(type) { emptyList() }
                         .getOrElse(track) { SignalState() }
 
                     Box(

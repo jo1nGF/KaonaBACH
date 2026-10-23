@@ -1,6 +1,7 @@
 package com.kaona.bach.viewmodel
 
 import android.app.Application
+import android.os.Process
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaona.bach.engine.*
@@ -12,9 +13,21 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.Executors
+import java.util.concurrent.locks.LockSupport
 
 /** Sinal de uma saída: [count] sobe a cada emissão (a UI usa para piscar) e [level] é o último valor (0-127). */
 data class SignalState(val count: Int = 0, val level: Int = 0)
+
+/**
+ * Sinais das saídas, em um fluxo próprio: só os componentes que mostram os LEDs recompõem a
+ * cada nota, em vez da tela inteira.
+ */
+data class SignalSnapshot(
+    val gate: List<SignalState> = List(4) { SignalState() },
+    val mod: List<SignalState> = List(4) { SignalState() },
+    val pitch: List<SignalState> = List(4) { SignalState() }
+)
 
 data class UiState(
     val isPlaying: Boolean = false,
@@ -37,9 +50,6 @@ data class UiState(
     val trackActivity: IntArray = intArrayOf(0, 0, 0, 0),
     /** outputEnabled[tipo][voz]; tipo 0 = GATE, 1 = MOD, 2 = PITCH */
     val outputEnabled: List<List<Boolean>> = List(3) { List(4) { true } },
-    val gateSignals: List<SignalState> = List(4) { SignalState() },
-    val modSignals: List<SignalState> = List(4) { SignalState() },
-    val pitchSignals: List<SignalState> = List(4) { SignalState() },
     val breakCharacter: BreakCharacter = BreakCharacter.AUTO,
     val breakBars: Int = 2,
     val isBreakActive: Boolean = false,
@@ -58,8 +68,23 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    private val _signals = MutableStateFlow(SignalSnapshot())
+    val signals: StateFlow<SignalSnapshot> = _signals.asStateFlow()
+
     private var clockJob: Job? = null
     private val ppqn = 96
+
+    // Thread dedicada e de prioridade alta para o clock: não disputa com a UI nem com o pool padrão
+    private val clockDispatcher: ExecutorCoroutineDispatcher =
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(
+                Runnable {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+                    runnable.run()
+                },
+                "bach-clock"
+            )
+        }.asCoroutineDispatcher()
 
     init {
         presetManager.initFactoryPresets()
@@ -67,6 +92,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
 
     fun play() {
         if (_uiState.value.isPlaying) return
+        midiOutput.allNotesOff()
         engine.play()
         _uiState.value = _uiState.value.copy(isPlaying = true)
         BachMidiService.sendStart()
@@ -79,7 +105,12 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         engine.stop()
         midiOutput.allNotesOff()
         BachMidiService.sendStop()
-        _uiState.value = _uiState.value.copy(isPlaying = false, currentBar = 0, currentBeat = 0)
+        _uiState.value = _uiState.value.copy(
+            isPlaying = false,
+            currentBar = 0,
+            currentBeat = 0,
+            trackActivity = intArrayOf(0, 0, 0, 0)
+        )
     }
 
     fun togglePlayStop() {
@@ -238,15 +269,23 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startClock() {
-        clockJob = viewModelScope.launch(Dispatchers.Default) {
+        clockJob = viewModelScope.launch(clockDispatcher) {
+            // Agenda absoluta: cada tick é calculado a partir do anterior, então o tempo gasto
+            // processando ou dormindo não se acumula (sem drift).
+            var nextTickNanos = System.nanoTime()
+
+            try {
             while (isActive) {
                 val bpm = _uiState.value.bpm
-                val tickIntervalUs = (60_000_000.0 / (bpm * ppqn)).toLong()
+                val tickIntervalNanos = (60_000_000_000.0 / (bpm * ppqn)).toLong()
 
                 val events = engine.processTick()
                 val engineState = engine.getState()
 
-                if (events.isNotEmpty()) {
+                // Fecha as notas cujo tempo acabou (precisão de tick)
+                midiOutput.onTick(engineState.currentTick)
+
+                if (events.isNotEmpty() && isActive) {
                     val enabled = _uiState.value.outputEnabled
                     val gateHits = IntArray(4)
                     val gateLevel = IntArray(4)
@@ -263,7 +302,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                         val pitchOn = enabled[2].getOrElse(track) { true }
                         val channel = engineState.midiChannels.getOrElse(event.track) { event.track + 1 }
 
-                        midiOutput.sendNoteEvent(event, channel, bpm, gateOn, modOn, pitchOn)
+                        midiOutput.sendNoteEvent(event, channel, gateOn, modOn, pitchOn)
 
                         if (gateOn) {
                             gateHits[track]++
@@ -280,28 +319,34 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
 
-                    _uiState.update { cur ->
-                        val activity = cur.trackActivity.copyOf()
-                        for (t in 0..3) if (lastNote[t] >= 0) activity[t] = lastNote[t]
+                    _signals.update { cur ->
                         cur.copy(
-                            gateSignals = cur.gateSignals.bump(gateHits, gateLevel),
-                            modSignals = cur.modSignals.bump(modHits, modLevel),
-                            pitchSignals = cur.pitchSignals.bump(pitchHits, pitchLevel),
-                            trackActivity = activity
+                            gate = cur.gate.bump(gateHits, gateLevel),
+                            mod = cur.mod.bump(modHits, modLevel),
+                            pitch = cur.pitch.bump(pitchHits, pitchLevel)
                         )
+                    }
+
+                    // A tela principal só é recomposta quando uma voz toca pela primeira vez
+                    val activityNow = _uiState.value.trackActivity
+                    if ((0..3).any { lastNote[it] >= 0 && activityNow[it] == 0 }) {
+                        _uiState.update { cur ->
+                            val activity = cur.trackActivity.copyOf()
+                            for (t in 0..3) if (lastNote[t] >= 0 && activity[t] == 0) activity[t] = lastNote[t]
+                            cur.copy(trackActivity = activity)
+                        }
                     }
                 }
 
                 if (engineState.currentTick % ppqn == 0L) {
-                    withContext(Dispatchers.Main) {
-                        _uiState.update {
-                            it.copy(
-                                currentBar = engineState.currentBar,
-                                currentBeat = engineState.currentBeat,
-                                isBreakActive = engineState.isBreakActive,
-                                isMidiConnected = BachMidiService.isConnected
-                            )
-                        }
+                    // StateFlow é thread-safe: não precisa (nem deve) esperar a thread principal
+                    _uiState.update {
+                        it.copy(
+                            currentBar = engineState.currentBar,
+                            currentBeat = engineState.currentBeat,
+                            isBreakActive = engineState.isBreakActive,
+                            isMidiConnected = BachMidiService.isConnected
+                        )
                     }
                 }
 
@@ -309,13 +354,22 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                     BachMidiService.sendClock()
                 }
 
-                if (tickIntervalUs > 1000) {
-                    delay(tickIntervalUs / 1000)
-                } else {
-                    val end = System.nanoTime() + tickIntervalUs * 1000
-                    @Suppress("ControlFlowWithEmptyBody")
-                    while (System.nanoTime() < end) { }
+                // Próximo tick; se ficou muito atrasado (app pausado), ressincroniza
+                nextTickNanos += tickIntervalNanos
+                if (System.nanoTime() - nextTickNanos > 50_000_000L) {
+                    nextTickNanos = System.nanoTime()
                 }
+
+                // Dorme quase tudo e gira só nos últimos ~150 µs para acertar o instante
+                while (isActive) {
+                    val remaining = nextTickNanos - System.nanoTime()
+                    if (remaining <= 0L) break
+                    if (remaining > 300_000L) LockSupport.parkNanos(remaining - 150_000L)
+                }
+            }
+            } finally {
+                // Garante que nenhuma nota fique presa se o stop() chegar no meio de um tick
+                midiOutput.allNotesOff()
             }
         }
     }
@@ -324,5 +378,6 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         stop()
         midiOutput.destroy()
+        clockDispatcher.close()
     }
 }
