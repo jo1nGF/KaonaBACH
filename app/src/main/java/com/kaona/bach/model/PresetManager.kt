@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.kaona.bach.engine.*
+import com.kaona.bach.midi.MidiInSettings
 
 /**
  * Manages saving/loading of presets (up to 128, matching hardware).
@@ -28,7 +29,15 @@ data class Preset(
     val breakBars: Int = 2,
     val ornaments: Float = 0f,
     val sequence: String = "",
-    val sequenceEnabled: Boolean = true
+    val sequenceEnabled: Boolean = true,
+    val durationMode: String = "VARIABLE",
+    val velocityMode: String = "MODULATED",
+    val meter: String = "M44",
+    val swing: Float = 0f,
+    val phraseBars: Int = 0,
+    val rootOctave: Int = 4,
+    val groovePartner: String = "CANON",
+    val breakLive: Boolean = false
 )
 
 class PresetManager(private val context: Context) {
@@ -45,6 +54,33 @@ class PresetManager(private val context: Context) {
         val json = prefs.getString("preset_$index", null) ?: return null
         return try {
             gson.fromJson(json, Preset::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** O módulo salva continuamente o estado e o retoma ao reiniciar. */
+    fun saveAutosave(preset: Preset) {
+        prefs.edit().putString("autosave", gson.toJson(preset)).apply()
+    }
+
+    fun loadAutosave(): Preset? {
+        val json = prefs.getString("autosave", null) ?: return null
+        return try {
+            gson.fromJson(json, Preset::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun saveMidiIn(settings: MidiInSettings) {
+        prefs.edit().putString("midi_in", gson.toJson(settings)).apply()
+    }
+
+    fun loadMidiIn(): MidiInSettings? {
+        val json = prefs.getString("midi_in", null) ?: return null
+        return try {
+            gson.fromJson(json, MidiInSettings::class.java)
         } catch (e: Exception) {
             null
         }
@@ -84,8 +120,18 @@ class PresetManager(private val context: Context) {
             midiChannels = preset.midiChannels.toIntArray(),
             breakConfig = BreakConfig(
                 character = try { BreakCharacter.valueOf(preset.breakCharacter) } catch (e: Exception) { BreakCharacter.AUTO },
-                bars = preset.breakBars
+                bars = preset.breakBars,
+                isLive = preset.breakLive
             ),
+            music = MusicSettings(
+                duration = try { DurationMode.valueOf(preset.durationMode) } catch (e: Exception) { DurationMode.VARIABLE },
+                velocity = try { VelocityMode.valueOf(preset.velocityMode) } catch (e: Exception) { VelocityMode.MODULATED },
+                meter = try { Meter.valueOf(preset.meter) } catch (e: Exception) { Meter.M44 },
+                swing = preset.swing,
+                phraseBars = preset.phraseBars,
+                rootOctave = preset.rootOctave.coerceIn(1, 6)
+            ),
+            groovePartner = try { CompositionalLanguage.valueOf(preset.groovePartner) } catch (e: Exception) { CompositionalLanguage.CANON },
             ornaments = preset.ornaments,
             sequence = HarmonicSequence.decode(preset.sequence, preset.sequenceEnabled)
         )
@@ -112,7 +158,15 @@ class PresetManager(private val context: Context) {
             breakBars = state.breakConfig.bars,
             ornaments = state.ornaments,
             sequence = state.sequence.encode(),
-            sequenceEnabled = state.sequence.enabled
+            sequenceEnabled = state.sequence.enabled,
+            durationMode = state.music.duration.name,
+            velocityMode = state.music.velocity.name,
+            meter = state.music.meter.name,
+            swing = state.music.swing,
+            phraseBars = state.music.phraseBars,
+            rootOctave = state.music.rootOctave,
+            groovePartner = state.groovePartner.name,
+            breakLive = state.breakConfig.isLive
         )
     }
 

@@ -119,7 +119,7 @@ class CellularEngine : CompositionEngine {
         val params = state.params
 
         // Set rule from material parameter (0-255)
-        ruleNumber = (params.material * 255).toInt().coerceIn(0, 255)
+        ruleNumber = 1 + (params.material * 253).toInt().coerceIn(0, 253)  // R001 a R254
         parseRule(ruleNumber)
 
         // Grid width based on density

@@ -156,31 +156,36 @@ class FugueEngine : CompositionEngine {
 
     // --- Subject generation ---
 
+    // Famílias de sujeito (graus da escala): contornos originais pensados para uma resposta tonal
+    private val subjectFamilies: List<IntArray> = listOf(
+        intArrayOf(0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0, 0),        // ARCH: sobe a um pico central e volta
+        intArrayOf(0, 4, 0, 7, 4, 0, 4, 7, 4, 0, -3, 0),       // FIFTHS: dominante, oitava e retornos da quinta
+        intArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0, 0), // SCALAR: sobe e desce por graus conjuntos
+        intArrayOf(0, 2, 1, 3, 2, 4, 3, 5, 4, 2, 1, 0),        // SYNCOPATED: zigue-zague que desloca os acentos
+        intArrayOf(0, 1, 0, -1, 0, 2, 1, 0, -1, 0, 1, 0),      // TURN: grupeto em torno da tônica
+        intArrayOf(0, 2, 0, 3, 0, 4, 0, 2, 0, 1, 0, 0),        // PEDAL: a tônica volta como pivô
+        intArrayOf(0, 1, -1, 2, -2, 3, -3, 4, -4, 3, -3, 0),   // WEDGE: intervalos abrem acima e abaixo
+        intArrayOf(0, 0, 2, 2, 4, 4, 2, 2, 3, 1, 0, 0)         // CHORALE: contorno de acordes
+    )
+
     private fun generateSubject(state: EngineState, random: Random) {
         val params = state.params
-        val length = (8 + (params.material * 8).toInt()).coerceIn(8, 16)
+        val family = MaterialCatalog.index(CompositionalLanguage.FUGUE, params.material)
+            .coerceIn(0, subjectFamilies.size - 1)
+        val template = subjectFamilies[family]
         val scaleSize = state.scale.degrees.size
 
-        val degrees = mutableListOf<Int>()
-        var currentDegree = 0 // Start on tonic
-
-        for (i in 0 until length) {
-            degrees.add(currentDegree)
-
-            // Generate next degree with stepwise bias
-            val stepBias = 1.0f - params.tension * 0.5f
-            val step = if (random.nextFloat() < stepBias) {
-                // Stepwise motion
-                if (random.nextBoolean()) 1 else -1
+        // TENSION ainda desloca alguns graus do contorno
+        val degrees = template.map { d ->
+            val varied = if (random.nextFloat() < params.tension * 0.25f) {
+                d + (if (random.nextBoolean()) 1 else -1)
             } else {
-                // Leap
-                val leap = random.nextInt(3) + 2
-                if (random.nextBoolean()) leap else -leap
+                d
             }
-            currentDegree = (currentDegree + step).coerceIn(-scaleSize, scaleSize * 2 - 1)
+            varied.coerceIn(-scaleSize, scaleSize * 2 - 1)
         }
 
-        subject = degrees
+        subject = degrees.toMutableList()
     }
 
     private fun generateAnswer(state: EngineState) {

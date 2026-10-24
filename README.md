@@ -136,3 +136,12 @@ O B.A.C.H. original é um produto comercial disponível em: https://www.kaona.fr
 
 - **ORNAMENTS** (⚙ Settings → ORNAMENTS: OFF a 100%): adiciona appoggiaturas, mordentes, turns e trinados conforme o andamento, a duração da nota e a posição métrica. Em GROOVE e GROOVE MIX gera flams.
 - **SEQUENCE** (botão ♪ SEQ): progressão harmônica de até 64 posições (raiz, qualidade, duração e inversão/VOICING). Notas estruturais vão para o acorde; notas de passagem vão para a escala ou o acorde. FUGUE e GROOVE ignoram a progressão. Há 32 formas de fábrica (QUICK/NORMAL/LONG) e 128 slots de usuário.
+
+## Página MUSIC, MIDI IN e demais recursos
+
+- **MUSIC** (botão MUSIC): ROOT (nota e oitava C1–C6; FUGUE no mínimo C2), DURATION, VELOCITY (FULL, MODULATED, HARD, SOFT, COOL, PROGRESS), METER (2/4 a 12/8), SWING e PHRASE (1–32 compassos ou INFINITE). SCALE e ORNAMENTS ficam em ⚙ Settings.
+- **STOP é pausa**: PLAY retoma do mesmo ponto; RESET reinicia a forma e volta a SEQUENCE à posição 1.
+- **Duplo toque num knob** devolve o parâmetro ao valor de referência (o do preset carregado ou o de fábrica).
+- **MIDI IN**: clock externo (F8/FA/FB/FC), RESET ON STOP, nota que define o ROOT e atribuição de CCs com LEARN (padrão: canal 1, CC 16–27; ALGORITHM no CC 24).
+- **Autosave**: os ajustes são salvos continuamente e retomados ao abrir o app.
+- **BREAK LIVE**, escolha do parceiro do **GROOVE MIX**, páginas **CONTROLS** e **VISUAL**, modo **HARMONY** na SEQUENCE.

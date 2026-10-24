@@ -10,6 +10,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.kaona.bach.engine.CompositionalLanguage
+import com.kaona.bach.engine.MaterialCatalog
 import com.kaona.bach.ui.components.*
 import com.kaona.bach.ui.theme.BachTheme
 import com.kaona.bach.viewmodel.BachViewModel
@@ -65,12 +67,14 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     ParameterKnob(
                         label = "Material",
                         value = state.material,
-                        onValueChange = { viewModel.updateParam("material", it) }
+                        onValueChange = { viewModel.updateParam("material", it) },
+                        onReset = { viewModel.resetParam("material") }
                     )
                     ParameterKnob(
                         label = "Density",
                         value = state.density,
-                        onValueChange = { viewModel.updateParam("density", it) }
+                        onValueChange = { viewModel.updateParam("density", it) },
+                        onReset = { viewModel.resetParam("density") }
                     )
                 }
 
@@ -81,12 +85,14 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     ParameterKnob(
                         label = "Memory",
                         value = state.memory,
-                        onValueChange = { viewModel.updateParam("memory", it) }
+                        onValueChange = { viewModel.updateParam("memory", it) },
+                        onReset = { viewModel.resetParam("memory") }
                     )
                     ParameterKnob(
                         label = "Tension",
                         value = state.tension,
-                        onValueChange = { viewModel.updateParam("tension", it) }
+                        onValueChange = { viewModel.updateParam("tension", it) },
+                        onReset = { viewModel.resetParam("tension") }
                     )
                 }
 
@@ -97,12 +103,14 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     ParameterKnob(
                         label = "Growth",
                         value = state.growth,
-                        onValueChange = { viewModel.updateParam("growth", it) }
+                        onValueChange = { viewModel.updateParam("growth", it) },
+                        onReset = { viewModel.resetParam("growth") }
                     )
                     ParameterKnob(
                         label = "Interaction",
                         value = state.interaction,
-                        onValueChange = { viewModel.updateParam("interaction", it) }
+                        onValueChange = { viewModel.updateParam("interaction", it) },
+                        onReset = { viewModel.resetParam("interaction") }
                     )
                 }
 
@@ -113,12 +121,14 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     ParameterKnob(
                         label = "Morph",
                         value = state.morph,
-                        onValueChange = { viewModel.updateParam("morph", it) }
+                        onValueChange = { viewModel.updateParam("morph", it) },
+                        onReset = { viewModel.resetParam("morph") }
                     )
                     ParameterKnob(
                         label = "Humanize",
                         value = state.humanize,
-                        onValueChange = { viewModel.updateParam("humanize", it) }
+                        onValueChange = { viewModel.updateParam("humanize", it) },
+                        onReset = { viewModel.resetParam("humanize") }
                     )
                 }
             }
@@ -137,7 +147,10 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     currentBar = state.currentBar,
                     currentBeat = state.currentBeat,
                     isPlaying = state.isPlaying,
-                    isBreakActive = state.isBreakActive
+                    isBreakActive = state.isBreakActive,
+                    materialName = MaterialCatalog.name(state.currentLanguage, state.material),
+                    externalClock = state.externalClock,
+                    beatsPerBar = state.music.meter.barTicks / state.music.meter.beatTicks
                 )
 
                 BpmControl(
@@ -177,12 +190,14 @@ fun BachMainScreen(viewModel: BachViewModel) {
                 ornaments = state.ornaments,
                 breakCharacter = state.breakCharacter,
                 breakBars = state.breakBars,
+                breakLive = state.breakLive,
                 midiChannels = state.midiChannels,
                 onRootChange = { viewModel.setRoot(it) },
                 onScaleChange = { viewModel.setScale(it) },
                 onOrnamentsChange = { viewModel.setOrnaments(it) },
                 onBreakCharChange = { viewModel.setBreakCharacter(it) },
                 onBreakBarsChange = { viewModel.setBreakBars(it) },
+                onBreakLive = { viewModel.setBreakLive() },
                 onMidiChannelChange = { track, ch -> viewModel.setMidiChannel(track, ch) }
             )
         }
@@ -205,6 +220,41 @@ fun BachMainScreen(viewModel: BachViewModel) {
             Spacer(modifier = Modifier.height(12.dp))
         }
 
+        when (state.toolPage) {
+            1 -> {
+                MusicPanel(
+                    music = state.music,
+                    rootNote = state.rootNote,
+                    onRootChange = { viewModel.setRoot(it) },
+                    onChange = { transform -> viewModel.updateMusic(transform) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            2 -> {
+                MidiInPanel(
+                    settings = state.midiIn,
+                    learning = state.learning,
+                    monitor = viewModel.midiMonitor,
+                    onClockEnabled = { viewModel.setClockEnabled(it) },
+                    onResetOnStop = { viewModel.setResetOnStop(it) },
+                    onRootChannel = { viewModel.setRootChannel(it) },
+                    onAssign = { command, assign -> viewModel.setAssign(command, assign) },
+                    onClear = { viewModel.clearAssign(it) },
+                    onLearn = { viewModel.startLearn(it) }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            3 -> {
+                ControlsPanel(state = state)
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            4 -> {
+                VisualPanel(state = state, signals = viewModel.signals)
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            else -> {}
+        }
+
         if (state.showPresets) {
             PresetsPanel(
                 currentIndex = state.presetIndex,
@@ -215,10 +265,22 @@ fun BachMainScreen(viewModel: BachViewModel) {
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        ToolsRow(activePage = state.toolPage, onSelect = { viewModel.setToolPage(it) })
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         LanguageSelector(
             currentLanguage = state.currentLanguage,
             onLanguageSelect = { viewModel.setLanguage(it) }
         )
+
+        if (state.currentLanguage == CompositionalLanguage.GROOVE_MIX) {
+            Spacer(modifier = Modifier.height(6.dp))
+            GroovePartnerRow(
+                current = state.groovePartner,
+                onSelect = { viewModel.setGroovePartner(it) }
+            )
+        }
 
         Spacer(modifier = Modifier.height(4.dp))
 

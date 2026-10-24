@@ -33,12 +33,14 @@ fun SettingsPanel(
     ornaments: Float,
     breakCharacter: BreakCharacter,
     breakBars: Int,
+    breakLive: Boolean,
     midiChannels: IntArray,
     onRootChange: (NoteName) -> Unit,
     onScaleChange: (Scale) -> Unit,
     onOrnamentsChange: (Float) -> Unit,
     onBreakCharChange: (BreakCharacter) -> Unit,
     onBreakBarsChange: (Int) -> Unit,
+    onBreakLive: () -> Unit,
     onMidiChannelChange: (Int, Int) -> Unit
 ) {
     val colors = BachTheme.colors
@@ -253,8 +255,29 @@ fun SettingsPanel(
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // LIVE: o Break não tem fim marcado e fecha num segundo toque em BREAK
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (breakLive) colors.accent.copy(alpha = 0.25f) else colors.surface)
+                    .border(
+                        0.5.dp,
+                        if (breakLive) colors.accent else colors.surfaceVariant,
+                        RoundedCornerShape(4.dp)
+                    )
+                    .clickable { onBreakLive() }
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "LIVE",
+                    color = if (breakLive) colors.accent else colors.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = if (breakLive) FontWeight.Bold else FontWeight.Normal
+                )
+            }
             listOf(1, 2, 4, 8).forEach { bars ->
-                val isSelected = bars == breakBars
+                val isSelected = !breakLive && bars == breakBars
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier

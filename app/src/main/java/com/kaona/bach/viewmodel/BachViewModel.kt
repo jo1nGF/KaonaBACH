@@ -6,14 +6,23 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaona.bach.engine.*
 import com.kaona.bach.midi.BachMidiService
+import com.kaona.bach.midi.MidiAssign
+import com.kaona.bach.midi.MidiCommand
+import com.kaona.bach.midi.MidiInSettings
+import com.kaona.bach.midi.MidiMonitor
+import com.kaona.bach.midi.languageFromCc
 import com.kaona.bach.midi.MidiOutputManager
+import com.kaona.bach.model.Preset
 import com.kaona.bach.model.PresetManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 import java.util.concurrent.locks.LockSupport
 
 /** Sinal de uma saída: [count] sobe a cada emissão (a UI usa para piscar) e [level] é o último valor (0-127). */
@@ -62,7 +71,15 @@ data class UiState(
     val sequence: HarmonicSequence = HarmonicSequence(),
     val currentChord: String = "",
     val playingStep: Int = -1,
-    val showSequence: Boolean = false
+    val showSequence: Boolean = false,
+    val breakLive: Boolean = false,
+    val music: MusicSettings = MusicSettings(),
+    val groovePartner: CompositionalLanguage = CompositionalLanguage.CANON,
+    /** 0 = nenhuma; 1 = MUSIC; 2 = MIDI IN; 3 = CONTROLS; 4 = VISUAL */
+    val toolPage: Int = 0,
+    val externalClock: Boolean = false,
+    val midiIn: MidiInSettings = MidiInSettings(),
+    val learning: MidiCommand? = null
 )
 
 class BachViewModel(application: Application) : AndroidViewModel(application) {
@@ -91,15 +108,33 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
             )
         }.asCoroutineDispatcher()
 
+    private val _monitor = MutableStateFlow(MidiMonitor())
+    val midiMonitor: StateFlow<MidiMonitor> = _monitor.asStateFlow()
+
+    // Valor de referência dos knobs: o do último preset carregado/salvo, ou o de fábrica
+    private var referenceParams = BachParams()
+
+    private var msgCount = 0
+    private var clkCount = 0
+    private var extPulses = 0
+    private var extLastQuarterNanos = 0L
+    private var extLastPulseNanos = 0L
+    private val commandHigh = BooleanArray(MidiCommand.entries.size)
+
     init {
         presetManager.initFactoryPresets()
+        presetManager.loadMidiIn()?.let { saved -> _uiState.update { it.copy(midiIn = saved) } }
+        presetManager.loadAutosave()?.let { applyPreset(it) }
+        registerMidiCallbacks()
+        startAutosave()
+        startExternalClockWatchdog()
     }
 
     fun play() {
         if (_uiState.value.isPlaying) return
         midiOutput.allNotesOff()
         engine.play()
-        val chord = engine.chordDisplayAt(0)
+        val chord = engine.chordDisplayAt(engine.getState().currentTick)
         _uiState.value = _uiState.value.copy(
             isPlaying = true,
             currentChord = chord?.label ?: "",
@@ -117,8 +152,6 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         BachMidiService.sendStop()
         _uiState.value = _uiState.value.copy(
             isPlaying = false,
-            currentBar = 0,
-            currentBeat = 0,
             trackActivity = intArrayOf(0, 0, 0, 0),
             currentChord = "",
             playingStep = -1
@@ -129,10 +162,13 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isPlaying) stop() else play()
     }
 
+    /** RESET reinicia a forma e volta a SEQUENCE à posição 1; se estava tocando, continua tocando. */
     fun reset() {
+        val wasPlaying = _uiState.value.isPlaying
         stop()
         engine.reset()
-        _uiState.value = _uiState.value.copy(currentBar = 0, currentBeat = 0)
+        _uiState.update { it.copy(currentBar = 0, currentBeat = 0) }
+        if (wasPlaying) play()
     }
 
     fun triggerBreak() {
@@ -146,8 +182,11 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLanguage(language: CompositionalLanguage) {
+        // Ao trocar de algoritmo, MATERIAL volta ao centro da escolha mais próxima
+        val centered = MaterialCatalog.center(language, _uiState.value.material)
         engine.setLanguage(language)
-        _uiState.value = _uiState.value.copy(currentLanguage = language)
+        engine.updateParam("material", centered)
+        _uiState.value = _uiState.value.copy(currentLanguage = language, material = centered)
     }
 
     fun setBpm(bpm: Int) {
@@ -158,6 +197,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     fun setRoot(root: NoteName) {
         engine.setRoot(root)
         _uiState.value = _uiState.value.copy(rootNote = root)
+        updateMusic { it } // no C6 só a nota C é válida
     }
 
     fun setScale(scale: Scale) {
@@ -220,14 +260,24 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     private fun List<SignalState>.bump(hits: IntArray, levels: IntArray): List<SignalState> =
         mapIndexed { i, s -> if (hits[i] > 0) SignalState(s.count + hits[i], levels[i]) else s }
 
+    private fun applyBreakConfig(character: BreakCharacter, bars: Int, live: Boolean) {
+        engine.setBreakConfig(BreakConfig(character, bars, live))
+        _uiState.update { it.copy(breakCharacter = character, breakBars = bars, breakLive = live) }
+    }
+
     fun setBreakCharacter(character: BreakCharacter) {
-        engine.setBreakConfig(BreakConfig(character, _uiState.value.breakBars))
-        _uiState.value = _uiState.value.copy(breakCharacter = character)
+        val ui = _uiState.value
+        applyBreakConfig(character, ui.breakBars, ui.breakLive)
     }
 
     fun setBreakBars(bars: Int) {
-        engine.setBreakConfig(BreakConfig(_uiState.value.breakCharacter, bars))
-        _uiState.value = _uiState.value.copy(breakBars = bars)
+        applyBreakConfig(_uiState.value.breakCharacter, bars, false)
+    }
+
+    /** LIVE: o Break não tem fim marcado e fecha num segundo toque em BREAK. */
+    fun setBreakLive() {
+        val ui = _uiState.value
+        applyBreakConfig(ui.breakCharacter, ui.breakBars, true)
     }
 
     fun toggleSettings() {
@@ -243,8 +293,8 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(ornaments = value) }
     }
 
-    private fun applySequence(sequence: HarmonicSequence) {
-        engine.setSequence(sequence)
+    private fun applySequence(sequence: HarmonicSequence, restart: Boolean = false) {
+        engine.setSequence(sequence, restart)
         _uiState.update { it.copy(sequence = sequence) }
     }
 
@@ -257,11 +307,11 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearSequence() {
-        applySequence(HarmonicSequence(enabled = _uiState.value.sequence.enabled))
+        applySequence(HarmonicSequence(enabled = _uiState.value.sequence.enabled), restart = true)
     }
 
     fun loadFactorySequence(form: Int, speed: Int) {
-        applySequence(FactorySequences.build(form, speed))
+        applySequence(FactorySequences.build(form, speed), restart = true)
     }
 
     fun saveUserSequence(slot: Int) {
@@ -270,7 +320,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadUserSequence(slot: Int) {
         val encoded = presetManager.loadUserSequence(slot) ?: return
-        applySequence(HarmonicSequence.decode(encoded, true))
+        applySequence(HarmonicSequence.decode(encoded, true), restart = true)
     }
 
     fun togglePresets() {
@@ -281,34 +331,242 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         val state = engine.getState()
         val preset = presetManager.engineStateToPreset(state, index, name)
         presetManager.savePreset(preset)
+        referenceParams = state.params
         _uiState.value = _uiState.value.copy(presetIndex = index, presetName = name)
     }
 
     fun loadPreset(index: Int) {
         val preset = presetManager.loadPreset(index) ?: return
+        applyPreset(preset)
+    }
+
+    private fun applyPreset(preset: Preset) {
         val state = presetManager.presetToEngineState(preset)
         engine.setState(state)
-        _uiState.value = _uiState.value.copy(
-            bpm = preset.bpm,
-            currentLanguage = try { CompositionalLanguage.valueOf(preset.language) } catch (_: Exception) { CompositionalLanguage.FUGUE },
-            rootNote = try { NoteName.valueOf(preset.rootNote) } catch (_: Exception) { NoteName.C },
-            scale = try { Scale.valueOf(preset.scaleName) } catch (_: Exception) { Scale.MAJOR },
-            material = preset.material,
-            memory = preset.memory,
-            growth = preset.growth,
-            morph = preset.morph,
-            density = preset.density,
-            tension = preset.tension,
-            interaction = preset.interaction,
-            humanize = preset.humanize,
-            midiChannels = preset.midiChannels.toIntArray(),
-            breakCharacter = try { BreakCharacter.valueOf(preset.breakCharacter) } catch (_: Exception) { BreakCharacter.AUTO },
-            breakBars = preset.breakBars,
-            presetIndex = preset.index,
-            presetName = preset.name,
-            ornaments = preset.ornaments,
-            sequence = state.sequence
+        referenceParams = state.params
+        _uiState.update {
+            it.copy(
+                bpm = preset.bpm,
+                currentLanguage = state.language,
+                rootNote = state.rootNote,
+                scale = state.scale,
+                material = preset.material,
+                memory = preset.memory,
+                growth = preset.growth,
+                morph = preset.morph,
+                density = preset.density,
+                tension = preset.tension,
+                interaction = preset.interaction,
+                humanize = preset.humanize,
+                midiChannels = preset.midiChannels.toIntArray(),
+                breakCharacter = state.breakConfig.character,
+                breakBars = preset.breakBars,
+                breakLive = preset.breakLive,
+                presetIndex = preset.index,
+                presetName = preset.name,
+                ornaments = preset.ornaments,
+                sequence = state.sequence,
+                music = state.music,
+                groovePartner = state.groovePartner
+            )
+        }
+    }
+
+    // ---------------- MUSIC, telas e referência dos knobs ----------------
+
+    fun updateMusic(transform: (MusicSettings) -> MusicSettings) {
+        var m = transform(_uiState.value.music)
+        m = m.copy(swing = m.swing.coerceIn(0f, 1f), rootOctave = m.rootOctave.coerceIn(1, 6))
+        // O alcance do ROOT vai de C1 a C6: no C6 só a nota C é válida
+        if (m.rootOctave >= 6 && _uiState.value.rootNote != NoteName.C) m = m.copy(rootOctave = 5)
+        engine.setMusic(m)
+        _uiState.update { it.copy(music = m) }
+    }
+
+    fun setGroovePartner(language: CompositionalLanguage) {
+        engine.setGroovePartner(language)
+        _uiState.update { it.copy(groovePartner = language) }
+    }
+
+    fun setToolPage(page: Int) {
+        _uiState.update { it.copy(toolPage = if (it.toolPage == page) 0 else page) }
+    }
+
+    /** Clique no knob: volta ao valor de referência (o do preset ou o de fábrica). */
+    fun resetParam(param: String) {
+        val p = referenceParams
+        val value = when (param) {
+            "material" -> p.material
+            "memory" -> p.memory
+            "growth" -> p.growth
+            "morph" -> p.morph
+            "density" -> p.density
+            "tension" -> p.tension
+            "interaction" -> p.interaction
+            "humanize" -> p.humanize
+            else -> return
+        }
+        updateParam(param, value)
+    }
+
+    // ---------------- MIDI IN ----------------
+
+    private fun updateMidiIn(transform: (MidiInSettings) -> MidiInSettings) {
+        val updated = transform(_uiState.value.midiIn)
+        _uiState.update { it.copy(midiIn = updated) }
+        presetManager.saveMidiIn(updated)
+    }
+
+    fun setClockEnabled(enabled: Boolean) = updateMidiIn { it.copy(clockEnabled = enabled) }
+
+    fun setResetOnStop(enabled: Boolean) = updateMidiIn { it.copy(resetOnStop = enabled) }
+
+    fun setRootChannel(channel: Int) = updateMidiIn { it.copy(rootChannel = channel) }
+
+    fun setAssign(command: MidiCommand, assign: MidiAssign) = updateMidiIn { settings ->
+        settings.copy(
+            assignments = settings.assignments.mapIndexed { i, a -> if (i == command.ordinal) assign else a }
         )
+    }
+
+    fun clearAssign(command: MidiCommand) = setAssign(command, MidiAssign(1, -1))
+
+    /** Aprendizado: o próximo CC recebido (canal e número) é atribuído ao comando. */
+    fun startLearn(command: MidiCommand?) {
+        _uiState.update { it.copy(learning = if (it.learning == command) null else command) }
+    }
+
+    private fun registerMidiCallbacks() {
+        BachMidiService.onMidiControlChange = { ch, cc, value ->
+            viewModelScope.launch(Dispatchers.Main) { handleCc(ch, cc, value) }
+        }
+        BachMidiService.onMidiNoteOn = { ch, note, _ ->
+            viewModelScope.launch(Dispatchers.Main) { handleNoteOn(ch, note) }
+        }
+        BachMidiService.onMidiClockReceived = { onExternalClockPulse() }
+        BachMidiService.onMidiStartReceived = {
+            viewModelScope.launch(Dispatchers.Main) {
+                if (_uiState.value.midiIn.clockEnabled) {
+                    reset()
+                    play()
+                }
+            }
+        }
+        BachMidiService.onMidiContinueReceived = {
+            viewModelScope.launch(Dispatchers.Main) {
+                if (_uiState.value.midiIn.clockEnabled) reset()
+            }
+        }
+        BachMidiService.onMidiStopReceived = {
+            viewModelScope.launch(Dispatchers.Main) {
+                val settings = _uiState.value.midiIn
+                if (settings.clockEnabled) {
+                    stop()
+                    if (settings.resetOnStop) reset()
+                }
+            }
+        }
+    }
+
+    private fun handleCc(channel: Int, cc: Int, value: Int) {
+        msgCount++
+        _monitor.update { it.copy(channel = channel, cc = cc, value = value, messages = msgCount) }
+
+        val learning = _uiState.value.learning
+        if (learning != null) {
+            setAssign(learning, MidiAssign(channel, cc))
+            _uiState.update { it.copy(learning = null) }
+            return
+        }
+
+        val settings = _uiState.value.midiIn
+        for (command in MidiCommand.entries) {
+            val a = settings.assignments.getOrNull(command.ordinal) ?: continue
+            if (a.cc < 0 || a.cc != cc) continue
+            if (a.channel != 0 && a.channel != channel) continue
+            applyMidiCommand(command, value)
+        }
+    }
+
+    private fun applyMidiCommand(command: MidiCommand, value: Int) {
+        // RESET, BREAK e PLAY/STOP agem na borda de subida (0-63 = 0, 64-127 = 1)
+        val high = value >= 64
+        val wasHigh = commandHigh[command.ordinal]
+        commandHigh[command.ordinal] = high
+
+        when (command) {
+            MidiCommand.ALGORITHM -> setLanguage(languageFromCc(value))
+            MidiCommand.RESET -> if (high && !wasHigh) reset()
+            MidiCommand.BREAK -> if (high && !wasHigh) {
+                if (_uiState.value.isBreakActive) releaseBreak() else triggerBreak()
+            }
+            MidiCommand.PLAY_STOP -> if (high && !wasHigh) togglePlayStop()
+            else -> command.paramName?.let { updateParam(it, value / 127f) }
+        }
+    }
+
+    /** Uma nota recebida define o ROOT (e a oitava, de C1 a C6). */
+    private fun handleNoteOn(channel: Int, note: Int) {
+        msgCount++
+        _monitor.update { it.copy(channel = channel, messages = msgCount) }
+
+        val rootChannel = _uiState.value.midiIn.rootChannel
+        if (rootChannel < 0) return
+        if (rootChannel != 0 && rootChannel != channel) return
+
+        val pc = note % 12
+        var octave = (note / 12 - 1).coerceIn(1, 6)
+        if (octave == 6 && pc != 0) octave = 5
+        val root = NoteName.entries[pc]
+        engine.setRoot(root)
+        _uiState.update { it.copy(rootNote = root) }
+        updateMusic { it.copy(rootOctave = octave) }
+    }
+
+    /** Clock MIDI (F8): 24 pulsos por semínima; o andamento é medido numa semínima completa. */
+    private fun onExternalClockPulse() {
+        val now = System.nanoTime()
+        clkCount++
+        if (clkCount % 24 == 0) _monitor.update { it.copy(clocks = clkCount) }
+
+        if (!_uiState.value.midiIn.clockEnabled) return
+        extLastPulseNanos = now
+        extPulses++
+        if (extPulses % 24 == 0) {
+            if (extLastQuarterNanos != 0L) {
+                val bpm = (60_000_000_000.0 / (now - extLastQuarterNanos)).roundToInt().coerceIn(40, 240)
+                engine.setBpm(bpm)
+                _uiState.update { it.copy(bpm = bpm, externalClock = true) }
+            }
+            extLastQuarterNanos = now
+        }
+    }
+
+    /** Sem pulsos por ~2,5 s, o relógio interno volta a valer (o asterisco do BPM some). */
+    private fun startExternalClockWatchdog() {
+        viewModelScope.launch {
+            while (true) {
+                delay(500)
+                if (_uiState.value.externalClock && System.nanoTime() - extLastPulseNanos > 2_500_000_000L) {
+                    extLastQuarterNanos = 0L
+                    extPulses = 0
+                    _uiState.update { it.copy(externalClock = false) }
+                }
+            }
+        }
+    }
+
+    /** O módulo salva continuamente os ajustes e os retoma ao reiniciar. */
+    private fun startAutosave() {
+        viewModelScope.launch {
+            _uiState
+                .map { presetManager.engineStateToPreset(engine.getState(), it.presetIndex, it.presetName) }
+                .distinctUntilChanged()
+                .collect { preset ->
+                    delay(800)
+                    presetManager.saveAutosave(preset)
+                }
+        }
     }
 
     fun nextPreset() {
@@ -391,15 +649,20 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                if (engineState.currentTick % ppqn == 0L) {
-                    // Acorde da próxima batida (as trocas de acorde caem sempre em inícios de tempo)
+                if (engineState.currentTick % RhythmUtils.SIXTEENTH == 0L) {
                     val chord = engine.chordDisplayAt(engineState.currentTick)
+                    val label = chord?.label ?: ""
+                    val stepIndex = chord?.step ?: -1
+                    val cur = _uiState.value
+                    if (cur.currentChord != label || cur.playingStep != stepIndex) {
+                        _uiState.update { it.copy(currentChord = label, playingStep = stepIndex) }
+                    }
+                }
 
+                if (engineState.currentTick % engineState.music.meter.beatTicks == 0L) {
                     // StateFlow é thread-safe: não precisa (nem deve) esperar a thread principal
                     _uiState.update {
                         it.copy(
-                            currentChord = chord?.label ?: "",
-                            playingStep = chord?.step ?: -1,
                             currentBar = engineState.currentBar,
                             currentBeat = engineState.currentBeat,
                             isBreakActive = engineState.isBreakActive,
@@ -437,5 +700,11 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         stop()
         midiOutput.destroy()
         clockDispatcher.close()
+        BachMidiService.onMidiControlChange = null
+        BachMidiService.onMidiNoteOn = null
+        BachMidiService.onMidiClockReceived = null
+        BachMidiService.onMidiStartReceived = null
+        BachMidiService.onMidiContinueReceived = null
+        BachMidiService.onMidiStopReceived = null
     }
 }

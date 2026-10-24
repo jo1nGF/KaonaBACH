@@ -10,10 +10,11 @@ import com.kaona.bach.engine.ChordQuality.*
 object FactorySequences {
     val speedLabels = arrayOf("QUICK", "NORMAL", "LONG")
 
-    // Índices de duração: 0 = 1 BEAT, 1 = 2 BEATS, 2 = 1 BAR, 3 = 2 BARS, 4 = 3 BARS, 5 = 4 BARS, 6 = 8 BARS
+    // Índices de duração: 0 = 1 BEAT, 1 = 2 BEATS, 2 = 1/2 BAR, 3 = 1 BAR, 4 = 2 BARS,
+    // 5 = 3 BARS, 6 = 4 BARS, 7 = 8 BARS
     private const val B2 = 1
-    private const val BAR = 2
-    private const val BARS2 = 3
+    private const val BAR = 3
+    private const val BARS2 = 4
 
     private fun c(root: Int, quality: ChordQuality, length: Int) =
         ChordStep(root, quality, length, ChordStep.VOICING)
@@ -98,7 +99,7 @@ object FactorySequences {
     /** Monta a sequência da forma [form] na velocidade [speed] (0 = QUICK, 1 = NORMAL, 2 = LONG). */
     fun build(form: Int, speed: Int): HarmonicSequence {
         val steps = forms[form.coerceIn(0, forms.size - 1)].second.map {
-            it.copy(length = (it.length + speed - 1).coerceIn(0, ChordStep.LENGTH_BEATS.size - 1))
+            it.copy(length = (it.length + speed - 1).coerceIn(0, ChordStep.LENGTH_LABELS.size - 1))
         }
         return HarmonicSequence(
             steps = List(HarmonicSequence.SIZE) { steps.getOrElse(it) { ChordStep() } },

@@ -50,6 +50,7 @@ fun SequencePanel(
     var cursor by remember { mutableStateOf(0) }
     var speed by remember { mutableStateOf(1) }
     var userSlot by remember { mutableStateOf(1) }
+    var visualMode by remember { mutableStateOf(false) }
 
     val step = sequence.steps[cursor.coerceIn(0, HarmonicSequence.SIZE - 1)]
     val bypassed = language == CompositionalLanguage.FUGUE || language == CompositionalLanguage.GROOVE
@@ -83,6 +84,8 @@ fun SequencePanel(
                 fontFamily = FontFamily.Monospace
             )
             Spacer(modifier = Modifier.weight(1f))
+            SeqChip("HARMONY", visualMode) { visualMode = !visualMode }
+            Spacer(modifier = Modifier.width(4.dp))
             SeqChip(if (sequence.enabled) "ON" else "OFF", sequence.enabled) {
                 onEnabledChange(!sequence.enabled)
             }
@@ -104,6 +107,22 @@ fun SequencePanel(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        if (visualMode) {
+            // VISUALISATION: só o acorde que está tocando (a página HARMONY)
+            Text(
+                text = if (isPlaying && currentChord.isNotEmpty()) currentChord else "—",
+                color = colors.ledGreen,
+                fontSize = 48.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp)
+            )
+        }
+
+        if (!visualMode) {
         // Grade das 64 posições
         Row(
             modifier = Modifier
@@ -170,6 +189,8 @@ fun SequencePanel(
             SeqChip("VOICING", step.inversion == ChordStep.VOICING) {
                 onStepChange(cursor, step.copy(inversion = ChordStep.VOICING))
             }
+        }
+
         }
 
         Spacer(modifier = Modifier.height(10.dp))

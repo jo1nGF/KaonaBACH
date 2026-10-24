@@ -26,6 +26,11 @@ class OrnamentProcessor(private val random: Random) {
         turn = 0
     }
 
+    /** Agenda [e] para sair [delay] ticks depois de [tick] (swing e microtiming usam isto). */
+    fun defer(e: NoteEvent, tick: Long, delay: Int) {
+        scheduled.add(e.copy(startTick = tick + delay))
+    }
+
     /** Eventos agendados cujo momento chegou. */
     fun takeDue(tick: Long): List<NoteEvent> {
         if (scheduled.isEmpty()) return emptyList()

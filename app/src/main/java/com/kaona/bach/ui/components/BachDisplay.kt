@@ -35,7 +35,10 @@ fun BachDisplay(
     currentBeat: Int,
     isPlaying: Boolean,
     isBreakActive: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    materialName: String = "",
+    externalClock: Boolean = false,
+    beatsPerBar: Int = 4
 ) {
     val colors = BachTheme.colors
 
@@ -69,8 +72,8 @@ fun BachDisplay(
             )
 
             // Beat indicator dots
-            for (beat in 0..3) {
-                val angle = Math.toRadians((beat * 90 - 90).toDouble())
+            for (beat in 0 until beatsPerBar.coerceAtLeast(1)) {
+                val angle = Math.toRadians(beat * 360.0 / beatsPerBar.coerceAtLeast(1) - 90.0)
                 val dotRadius = if (beat == currentBeat && isPlaying) 5f else 3f
                 val dotColor = if (beat == currentBeat && isPlaying) {
                     colors.displayAccent
@@ -95,7 +98,7 @@ fun BachDisplay(
         ) {
             // BPM display
             Text(
-                text = "$bpm",
+                text = if (externalClock) "$bpm*" else "$bpm",
                 color = colors.displayText,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
@@ -110,6 +113,15 @@ fun BachDisplay(
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
+
+            if (materialName.isNotEmpty()) {
+                Text(
+                    text = materialName,
+                    color = colors.displayText.copy(alpha = 0.8f),
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
 
             if (isBreakActive) {
                 Text(

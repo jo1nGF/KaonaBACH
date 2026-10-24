@@ -43,16 +43,41 @@ class BachMidiService : MidiDeviceService() {
 
     private class InboundMidiReceiver : MidiReceiver() {
         override fun onSend(data: ByteArray?, offset: Int, count: Int, timestamp: Long) {
-            // Handle incoming MIDI (e.g., clock sync from external source)
-            data?.let {
-                if (count > 0) {
-                    val status = it[offset].toInt() and 0xFF
-                    when (status) {
-                        0xF8 -> onMidiClockReceived?.invoke()          // MIDI Clock
-                        0xFA -> onMidiStartReceived?.invoke()          // Start
-                        0xFB -> onMidiContinueReceived?.invoke()       // Continue
-                        0xFC -> onMidiStopReceived?.invoke()           // Stop
+            if (data == null || count <= 0) return
+            val end = offset + count
+            var i = offset
+            while (i < end) {
+                val status = data[i].toInt() and 0xFF
+                when {
+                    status == 0xF8 -> { // Clock: 24 pulsos por semínima
+                        onMidiClockReceived?.invoke()
+                        i += 1
                     }
+                    status == 0xFA -> {
+                        onMidiStartReceived?.invoke()
+                        i += 1
+                    }
+                    status == 0xFB -> {
+                        onMidiContinueReceived?.invoke()
+                        i += 1
+                    }
+                    status == 0xFC -> {
+                        onMidiStopReceived?.invoke()
+                        i += 1
+                    }
+                    status in 0xB0..0xBF && i + 2 < end -> {
+                        val cc = data[i + 1].toInt() and 0x7F
+                        val value = data[i + 2].toInt() and 0x7F
+                        onMidiControlChange?.invoke((status and 0x0F) + 1, cc, value)
+                        i += 3
+                    }
+                    status in 0x90..0x9F && i + 2 < end -> {
+                        val note = data[i + 1].toInt() and 0x7F
+                        val velocity = data[i + 2].toInt() and 0x7F
+                        if (velocity > 0) onMidiNoteOn?.invoke((status and 0x0F) + 1, note, velocity)
+                        i += 3
+                    }
+                    else -> i += 1
                 }
             }
         }
@@ -69,6 +94,12 @@ class BachMidiService : MidiDeviceService() {
         var onMidiStartReceived: (() -> Unit)? = null
         var onMidiContinueReceived: (() -> Unit)? = null
         var onMidiStopReceived: (() -> Unit)? = null
+
+        /** Control Change recebido: (canal 1-16, controlador, valor). */
+        var onMidiControlChange: ((Int, Int, Int) -> Unit)? = null
+
+        /** Note On recebido: (canal 1-16, nota, velocity). */
+        var onMidiNoteOn: ((Int, Int, Int) -> Unit)? = null
 
         /**
          * Send a Note On message

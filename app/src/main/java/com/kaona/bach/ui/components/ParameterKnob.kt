@@ -2,6 +2,7 @@ package com.kaona.bach.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -30,6 +31,7 @@ fun ParameterKnob(
     value: Float,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    onReset: () -> Unit = {},
     size: Int = 72
 ) {
     val colors = BachTheme.colors
@@ -38,6 +40,7 @@ fun ParameterKnob(
     // e o callback da primeira composição e o knob travaria/voltaria ao arrastar.
     val currentValue by rememberUpdatedState(value)
     val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnReset by rememberUpdatedState(onReset)
     var dragValue by remember { mutableStateOf(value) }
 
     Column(
@@ -58,6 +61,10 @@ fun ParameterKnob(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(size.dp)
+                // Duplo toque = "clique" do encoder: volta ao valor de referência
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = { currentOnReset() })
+                }
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { dragValue = currentValue }

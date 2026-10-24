@@ -92,7 +92,7 @@ class TintinnabuliEngine : CompositionEngine {
         }
 
         // --- Voices 1-3: T-voices (triad tones) ---
-        val triadNotes = getCurrentTriadNotes(state)
+        val triadNotes = getCurrentTriadNotes(state, tick)
         val tPositions = getTVoicePositions(params.interaction, params.morph)
 
         for (v in 1..3) {
@@ -268,7 +268,30 @@ class TintinnabuliEngine : CompositionEngine {
 
     // --- T-voice computation ---
 
-    private fun getCurrentTriadNotes(state: EngineState): List<Int> {
+    /**
+     * As T-voices usam as notas do acorde atual da SEQUENCE; sem progressão ativa, usam a tríade
+     * central (graus 1, 3 e 5 da escala).
+     */
+    private fun getCurrentTriadNotes(state: EngineState, tick: Long): List<Int> {
+        val seq = state.sequence
+        if (seq.isActive) {
+            val pos = HarmonyEngine.locate(seq, tick - state.sequenceOrigin, state.music.meter)
+            if (pos != null) {
+                val pcs = HarmonyEngine.pitchClasses(seq.steps[pos.index], state.rootNote, state.scale)
+                val chordNotes = ArrayList<Int>()
+                for (octave in 0..9) {
+                    for (pc in pcs) {
+                        val n = octave * 12 + pc
+                        if (n in 0..127) chordNotes.add(n)
+                    }
+                }
+                return chordNotes.sorted()
+            }
+        }
+        return getScaleTriadNotes(state)
+    }
+
+    private fun getScaleTriadNotes(state: EngineState): List<Int> {
         // Get triad notes from current chord in the progression, or build from root
         val rootMidi = state.rootNote.midiValue
         val degrees = state.scale.degrees

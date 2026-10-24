@@ -85,6 +85,9 @@ data class EngineState(
     val scale: Scale = Scale.MAJOR,
     val sequence: HarmonicSequence = HarmonicSequence(),   // Progressão harmônica (SEQUENCE)
     val ornaments: Float = 0f,                              // 0.0-1.0: quantidade de ornamentos (OFF-100%)
+    val music: MusicSettings = MusicSettings(),             // Página MUSIC (duração, velocity, métrica, swing, frase, raiz)
+    val groovePartner: CompositionalLanguage = CompositionalLanguage.CANON, // Parceiro melódico do GROOVE MIX
+    val sequenceOrigin: Long = 0L,                          // Tick em que a leitura da SEQUENCE recomeçou
     val breakConfig: BreakConfig = BreakConfig(),
     val isBreakActive: Boolean = false,
     val midiChannels: IntArray = intArrayOf(1, 2, 3, 4), // MIDI channels for 4 voices
@@ -100,6 +103,8 @@ class BachEngine {
     private val random = Random()
     private val harmony = HarmonyProcessor()
     private val ornamentProcessor = OrnamentProcessor(random)
+    private val humanizer = HumanizeProcessor(random)
+    private val partnerPitch = IntArray(4) { -1 }
     @Volatile
     private var state = EngineState()
     private val eventBuffer = mutableListOf<NoteEvent>()
@@ -118,6 +123,12 @@ class BachEngine {
     private val motifEngine = MotifEngine()
     private val grooveEngine = GrooveEngine()
 
+    // Ordem dos materiais do HYBRID: FUGUE, CANON, PROBA, TINTINA, MINIMAL, CELLULAR, TREE, FRACTAL, MOTIF
+    private val hybridEngines: List<CompositionEngine> = listOf(
+        fugueEngine, canonEngine, probaEngine, tintinnabuliEngine, minimalEngine,
+        cellularEngine, treeEngine, fractalEngine, motifEngine
+    )
+
     // Break engine
     private var breakStartTick: Long = 0
     private var breakEvents = mutableListOf<NoteEvent>()
@@ -130,23 +141,45 @@ class BachEngine {
     }
 
     @Synchronized
-    fun setSequence(sequence: HarmonicSequence) {
-        state = state.copy(sequence = sequence)
+    fun setSequence(sequence: HarmonicSequence, restart: Boolean = false) {
+        state = state.copy(
+            sequence = sequence,
+            sequenceOrigin = if (restart) state.currentTick else state.sequenceOrigin
+        )
         harmony.invalidate()
+    }
+
+    @Synchronized
+    fun setMusic(music: MusicSettings) {
+        state = state.copy(music = music)
+    }
+
+    @Synchronized
+    fun setGroovePartner(language: CompositionalLanguage) {
+        state = state.copy(groovePartner = language)
+        partnerPitch.fill(-1)
     }
 
     /** Acorde que toca em [tick] (para a tela HARMONY); null se a SEQUENCE estiver inativa. */
     fun chordDisplayAt(tick: Long): ChordDisplay? {
         val st = state
         if (!st.sequence.isActive) return null
-        val pos = HarmonyEngine.locate(st.sequence, tick) ?: return null
+        val pos = HarmonyEngine.locate(st.sequence, tick - st.sequenceOrigin, st.music.meter) ?: return null
         return ChordDisplay(pos.index, HarmonyEngine.label(st.sequence.steps[pos.index], st.rootNote, st.scale))
     }
 
     @Synchronized
     fun setState(newState: EngineState) {
         harmony.invalidate()
-        state = newState
+        // Carregar um preset troca os ajustes, mas não o transporte: continua tocando/pausado onde estava
+        state = newState.copy(
+            isPlaying = state.isPlaying,
+            currentTick = state.currentTick,
+            currentBar = state.currentBar,
+            currentBeat = state.currentBeat,
+            trackMutes = state.trackMutes,
+            sequenceOrigin = state.currentTick
+        )
     }
 
     @Synchronized
@@ -205,10 +238,17 @@ class BachEngine {
 
     @Synchronized
     fun play() {
-        state = state.copy(isPlaying = true, currentTick = 0, currentBar = 0, currentBeat = 0)
-        harmony.reset()
-        ornamentProcessor.clear()
-        resetLanguageState()
+        if (state.isPlaying) return
+        // O STOP é uma pausa: tocar de novo retoma do mesmo ponto. Só um início "limpo" zera a forma.
+        val fresh = state.currentTick == 0L
+        state = state.copy(isPlaying = true)
+        if (fresh) {
+            state = state.copy(currentBar = 0, currentBeat = 0, sequenceOrigin = 0L)
+            harmony.reset()
+            humanizer.reset()
+            ornamentProcessor.clear()
+            resetLanguageState()
+        }
     }
 
     @Synchronized
@@ -221,10 +261,14 @@ class BachEngine {
 
     @Synchronized
     fun reset() {
+        val wasPlaying = state.isPlaying
         stop()
-        state = state.copy(currentTick = 0, currentBar = 0, currentBeat = 0)
+        state = state.copy(currentTick = 0, currentBar = 0, currentBeat = 0, sequenceOrigin = 0L)
         lastGeneratedNotes = IntArray(4) { 60 }
+        harmony.reset()
+        humanizer.reset()
         resetLanguageState()
+        if (wasPlaying) play()
     }
 
     @Synchronized
@@ -254,9 +298,9 @@ class BachEngine {
         if (!state.isPlaying) return emptyList()
 
         val currentTick = state.currentTick
-        val ticksPerBeat = RhythmUtils.QUARTER
-        val ticksPerBar = ticksPerBeat * 4
-        val newBeat = ((currentTick % ticksPerBar) / ticksPerBeat).toInt()
+        val meter = state.music.meter
+        val ticksPerBar = meter.barTicks
+        val newBeat = ((currentTick % ticksPerBar) / meter.beatTicks).toInt()
         val newBar = (currentTick / ticksPerBar).toInt()
 
         state = state.copy(
@@ -264,6 +308,15 @@ class BachEngine {
             currentBeat = newBeat,
             currentBar = newBar
         )
+
+        // PHRASE: no fim da frase o contador volta a zero e as linguagens reiniciam a arquitetura.
+        // A SEQUENCE não é afetada. INFINITE (0) nunca reinicia.
+        val phraseBars = state.music.phraseBars
+        if (phraseBars > 0 && currentTick > 0 &&
+            currentTick % (phraseBars.toLong() * ticksPerBar) == 0L
+        ) {
+            resetLanguageState()
+        }
 
         // Check if break should end
         if (state.isBreakActive && !state.breakConfig.isLive) {
@@ -282,14 +335,30 @@ class BachEngine {
             events.addAll(generateEventsAtTick(currentTick))
         }
 
-        // Filter muted tracks
+        // Pipeline musical: mute -> raiz (oitava) -> harmonia -> humanize (gesto) -> duração
+        //                   -> ornamentos -> swing -> velocity
         val audible = events.filter { !state.trackMutes[it.track] }
+        val transposed = MusicShaper.transpose(audible, state)
+        val harmonized = harmony.apply(transposed, currentTick, state)
+        val humanized = humanizer.process(harmonized, currentTick, state) { e, d ->
+            ornamentProcessor.defer(e, currentTick, d)
+        }
+        val durationed = MusicShaper.applyDuration(humanized, currentTick, state)
+        val ornamented = ornamentProcessor.process(durationed, currentTick, state)
 
-        // Harmonia (SEQUENCE) e ornamentos; as notas agendadas dos ornamentos saem quando o tick chega
-        val harmonized = harmony.apply(audible, currentTick, state)
-        val ornamented = ornamentProcessor.process(harmonized, currentTick, state)
+        // SWING: a contratempo sai um pouco depois; o tempo seguinte continua no relógio
+        val swingDelay = MusicShaper.swingDelay(currentTick, state)
+        val onTime: List<NoteEvent> = if (swingDelay > 0 && ornamented.isNotEmpty()) {
+            for (e in ornamented) ornamentProcessor.defer(e, currentTick, swingDelay)
+            emptyList()
+        } else {
+            ornamented
+        }
+
+        // Notas agendadas (ornamentos, swing, microtiming) que vencem neste tick
         val due = ornamentProcessor.takeDue(currentTick).filter { !state.trackMutes[it.track] }
-        val finalEvents = if (due.isEmpty()) ornamented else ornamented + due
+        val combined = if (due.isEmpty()) onTime else onTime + due
+        val finalEvents = MusicShaper.applyVelocity(combined, currentTick, state)
 
         // Apply humanization
         if (state.params.humanize > 0f) {
@@ -317,23 +386,73 @@ class BachEngine {
             CompositionalLanguage.MOTIF -> motifEngine.generate(tick, state, random)
             CompositionalLanguage.HYBRID -> generateHybrid(tick)
             CompositionalLanguage.GROOVE -> grooveEngine.generate(tick, state, random)
-            CompositionalLanguage.GROOVE_MIX -> grooveEngine.generateMix(tick, state, random)
+            CompositionalLanguage.GROOVE_MIX -> generateGrooveMix(tick)
         }
     }
 
+    /**
+     * HYBRID: MATERIAL escolhe a linguagem de referência entre as nove.
+     * INTERACTION distribui: acima de 66% as 4 vozes seguem a linguagem de referência; entre 33 e 66%
+     * duas linguagens dividem as vozes em pares; abaixo disso cada voz recebe a sua.
+     * MORPH acima de 66% gira a atribuição um passo a cada meio compasso.
+     */
     private fun generateHybrid(tick: Long): List<NoteEvent> {
-        // Hybrid mode: distribute different engines across 4 voices
-        val engines = listOf(fugueEngine, canonEngine, probaEngine, tintinnabuliEngine)
-        val materialIdx = (state.params.material * 3).toInt().coerceIn(0, 3)
-        val events = mutableListOf<NoteEvent>()
+        val engines = hybridEngines
+        val ref = MaterialCatalog.index(CompositionalLanguage.HYBRID, state.params.material)
+            .coerceIn(0, engines.size - 1)
+        val interaction = state.params.interaction
 
-        for (track in 0..3) {
-            val engineIdx = (track + materialIdx) % engines.size
-            val trackEvents = engines[engineIdx].generate(tick, state, random)
-                .filter { it.track == track }
-            events.addAll(trackEvents)
+        val assignment = IntArray(4)
+        when {
+            interaction > 0.66f -> for (t in 0..3) assignment[t] = ref
+            interaction > 0.33f -> {
+                val partner = (ref + 1) % engines.size
+                assignment[0] = ref
+                assignment[1] = ref
+                assignment[2] = partner
+                assignment[3] = partner
+            }
+            else -> for (t in 0..3) assignment[t] = (ref + t) % engines.size
+        }
+
+        if (state.params.morph > 0.66f) {
+            val halfBar = (state.music.meter.barTicks / 2).coerceAtLeast(1)
+            val rot = ((tick / halfBar) % 4).toInt()
+            if (rot != 0) {
+                val copy = assignment.copyOf()
+                for (t in 0..3) assignment[t] = copy[(t + rot) % 4]
+            }
+        }
+
+        val events = ArrayList<NoteEvent>()
+        for (idx in assignment.distinct()) {
+            val generated = engines[idx].generate(tick, state, random)
+            for (e in generated) {
+                if (e.track in 0..3 && assignment[e.track] == idx) events.add(e)
+            }
         }
         return events
+    }
+
+    /** GROOVE MIX: o ritmo vem do GROOVE e as alturas, do parceiro escolhido. */
+    private fun generateGrooveMix(tick: Long): List<NoteEvent> {
+        val partnerEvents = when (state.groovePartner) {
+            CompositionalLanguage.PROBA -> probaEngine.generate(tick, state, random)
+            CompositionalLanguage.CELLULAR -> cellularEngine.generate(tick, state, random)
+            CompositionalLanguage.TREE -> treeEngine.generate(tick, state, random)
+            CompositionalLanguage.FRACTAL -> fractalEngine.generate(tick, state, random)
+            CompositionalLanguage.MOTIF -> motifEngine.generate(tick, state, random)
+            CompositionalLanguage.HYBRID -> generateHybrid(tick)
+            else -> canonEngine.generate(tick, state, random)
+        }
+        for (e in partnerEvents) {
+            if (e.track in 0..3) partnerPitch[e.track] = e.midiNote
+        }
+
+        return grooveEngine.generateMix(tick, state, random).map { e ->
+            val p = if (e.track in 0..3) partnerPitch[e.track] else -1
+            if (p >= 0) e.copy(midiNote = p) else e
+        }
     }
 
     private fun generateBreakEvents(): MutableList<NoteEvent> {
@@ -432,5 +551,6 @@ class BachEngine {
         fractalEngine.reset()
         motifEngine.reset()
         grooveEngine.reset()
+        partnerPitch.fill(-1)
     }
 }

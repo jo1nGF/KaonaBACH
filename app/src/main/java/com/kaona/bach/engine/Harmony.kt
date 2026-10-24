@@ -38,26 +38,33 @@ enum class ChordQuality(val label: String, val suffix: String, val intervals: In
 /**
  * Uma posição da progressão.
  * [root] é um grau em semitons a partir da nota raiz (0-11) ou [EMPTY_ROOT];
- * [length] indexa [LENGTH_BEATS]; [inversion] vai de 0 a 3, ou [VOICING] (automático).
+ * [length] indexa [LENGTH_LABELS]; [inversion] vai de 0 a 3, ou [VOICING] (automático).
  */
 data class ChordStep(
     val root: Int = EMPTY_ROOT,
     val quality: ChordQuality = ChordQuality.DIATONIC,
-    val length: Int = 2,
+    val length: Int = 3,
     val inversion: Int = 0
 ) {
     val isEmpty: Boolean get() = root < 0
 
-    val lengthTicks: Int
-        get() = LENGTH_BEATS[length.coerceIn(0, LENGTH_BEATS.size - 1)] * RhythmUtils.QUARTER
+    /** Duração em ticks; tempos e compassos seguem a fórmula de compasso escolhida em MUSIC. */
+    fun lengthTicks(meter: Meter): Int = when (length.coerceIn(0, LENGTH_LABELS.size - 1)) {
+        0 -> meter.beatTicks
+        1 -> meter.beatTicks * 2
+        2 -> meter.barTicks / 2
+        3 -> meter.barTicks
+        4 -> meter.barTicks * 2
+        5 -> meter.barTicks * 3
+        6 -> meter.barTicks * 4
+        else -> meter.barTicks * 8
+    }
 
     companion object {
         const val EMPTY_ROOT = -1
         const val VOICING = 4
 
-        /** Duração do acorde em tempos (compasso 4/4). */
-        val LENGTH_BEATS = intArrayOf(1, 2, 4, 8, 12, 16, 32)
-        val LENGTH_LABELS = arrayOf("1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "3 BARS", "4 BARS", "8 BARS")
+        val LENGTH_LABELS = arrayOf("1 BEAT", "2 BEATS", "1/2 BAR", "1 BAR", "2 BARS", "3 BARS", "4 BARS", "8 BARS")
 
         /** Índice = root + 1 (posição 0 é EMPTY). */
         val ROOT_LABELS = arrayOf("-", "I", "bII", "II", "bIII", "III", "IV", "#IV", "V", "bVI", "VI", "bVII", "VII")
@@ -92,7 +99,7 @@ data class HarmonicSequence(
                     ChordStep(
                         root = f[0].toInt().coerceIn(-1, 11),
                         quality = ChordQuality.entries[f[1].toInt().coerceIn(0, ChordQuality.entries.size - 1)],
-                        length = f[2].toInt().coerceIn(0, ChordStep.LENGTH_BEATS.size - 1),
+                        length = f[2].toInt().coerceIn(0, ChordStep.LENGTH_LABELS.size - 1),
                         inversion = f[3].toInt().coerceIn(0, ChordStep.VOICING)
                     )
                 } catch (e: Exception) {
@@ -113,12 +120,12 @@ object HarmonyEngine {
     private val NOTE_LABELS = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     /** Acha o acorde que toca no [tick]; null se a progressão estiver vazia. */
-    fun locate(seq: HarmonicSequence, tick: Long): ChordPosition? {
+    fun locate(seq: HarmonicSequence, tick: Long, meter: Meter): ChordPosition? {
         var total = 0L
         var count = 0
         for (s in seq.steps) {
             if (s.isEmpty) break
-            total += s.lengthTicks
+            total += s.lengthTicks(meter)
             count++
         }
         if (total <= 0L) return null
@@ -126,7 +133,7 @@ object HarmonyEngine {
         val t = tick % total
         var acc = 0L
         for (i in 0 until count) {
-            val len = seq.steps[i].lengthTicks
+            val len = seq.steps[i].lengthTicks(meter)
             if (t < acc + len) return ChordPosition(i, tick - (t - acc))
             acc += len
         }
@@ -205,15 +212,17 @@ class HarmonyProcessor {
 
     fun apply(events: List<NoteEvent>, tick: Long, state: EngineState): List<NoteEvent> {
         val seq = state.sequence
+        // TINTINNABULI recebe o acorde direto no próprio motor; FUGUE e GROOVE ignoram a SEQUENCE
         val bypass = state.language == CompositionalLanguage.FUGUE ||
-            state.language == CompositionalLanguage.GROOVE
+            state.language == CompositionalLanguage.GROOVE ||
+            state.language == CompositionalLanguage.TINTINNABULI
 
         if (events.isEmpty() || !seq.isActive || bypass) {
             remember(events)
             return events
         }
 
-        val pos = HarmonyEngine.locate(seq, tick)
+        val pos = HarmonyEngine.locate(seq, tick - state.sequenceOrigin, state.music.meter)
         if (pos == null) {
             remember(events)
             return events
@@ -232,7 +241,7 @@ class HarmonyProcessor {
 
         for (e in events) {
             val track = e.track.coerceIn(0, 3)
-            val structural = tick % RhythmUtils.QUARTER == 0L || e.durationTicks >= RhythmUtils.QUARTER
+            val structural = tick % state.music.meter.beatTicks == 0L || e.durationTicks >= RhythmUtils.QUARTER
             val note = if (structural) {
                 closestPitch(chord[(inv + track) % chord.size], e.midiNote)
             } else {
