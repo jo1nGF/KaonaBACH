@@ -45,6 +45,11 @@ class PresetManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("bach_presets", Context.MODE_PRIVATE)
     private val maxPresets = 128
 
+    /** Limpa todos os dados salvos (usado quando dados corrompidos impedem o app de abrir). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+    }
+
     fun savePreset(preset: Preset) {
         val json = gson.toJson(preset)
         prefs.edit().putString("preset_${preset.index}", json).apply()

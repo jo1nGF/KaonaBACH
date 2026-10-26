@@ -144,7 +144,7 @@ fun BachDisplay(
                     ) {
                         for (col in 0..1) {
                             val track = row * 2 + col
-                            val isActive = trackActivity[track] > 0 && isPlaying
+                            val isActive = trackActivity.getOrElse(track) { 0 } > 0 && isPlaying
                             val channelLabel = "Ch ${channels.getOrElse(track) { track + 1 }}"
 
                             Box(

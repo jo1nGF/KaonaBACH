@@ -127,12 +127,33 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     private val commandHigh = BooleanArray(MidiCommand.entries.size)
 
     init {
-        presetManager.initFactoryPresets()
-        presetManager.loadMidiIn()?.let { saved -> _uiState.update { it.copy(midiIn = saved) } }
-        presetManager.loadAutosave()?.let { applyPreset(it) }
-        registerMidiCallbacks()
-        startAutosave()
-        startExternalClockWatchdog()
+        try {
+            presetManager.initFactoryPresets()
+            presetManager.loadMidiIn()?.let { saved -> _uiState.update { it.copy(midiIn = saved) } }
+            presetManager.loadAutosave()?.let { applyPreset(it) }
+        } catch (e: Exception) {
+            android.util.Log.e("BACH", "Init preset error, resetting", e)
+            // Se dados salvos estão corrompidos, limpa e recomeça
+            try {
+                presetManager.clearAll()
+                presetManager.initFactoryPresets()
+            } catch (_: Exception) { }
+        }
+        try {
+            registerMidiCallbacks()
+        } catch (e: Throwable) {
+            android.util.Log.e("BACH", "registerMidiCallbacks error", e)
+        }
+        try {
+            startAutosave()
+        } catch (e: Throwable) {
+            android.util.Log.e("BACH", "startAutosave error", e)
+        }
+        try {
+            startExternalClockWatchdog()
+        } catch (e: Throwable) {
+            android.util.Log.e("BACH", "startExternalClockWatchdog error", e)
+        }
     }
 
     fun play() {
