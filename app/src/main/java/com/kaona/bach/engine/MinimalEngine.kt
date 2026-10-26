@@ -23,24 +23,17 @@ class MinimalEngine : CompositionEngine {
         HOCKET              // Notes split between voices in interlocking fashion
     }
 
-    // Base patterns for different material settings
+    // As 8 células iniciais (graus da escala), na ordem dos Materials do manual:
+    // PHASE STEPS, ADD FIFTHS, HOCKET MODAL, SUBSTITUTION, PHASE CHORD, ADD WAVE, HOCKET MAJ7, SUBST WIDE
     private val basePatterns = listOf(
-        // Pattern 0: Simple pentatonic riff
-        intArrayOf(0, 2, 4, 7, 4, 2),
-        // Pattern 1: Modal pattern
-        intArrayOf(0, 1, 3, 5, 3, 1, 0, -1),
-        // Pattern 2: Rhythmic cluster
-        intArrayOf(0, 0, 4, 7, 0, 4, 7, 9),
-        // Pattern 3: Wider intervals
-        intArrayOf(0, 4, 7, 11, 7, 4, 0, -3),
-        // Pattern 4: Repetitive pulse
-        intArrayOf(0, 2, 0, 4, 0, 2, 0, 5),
-        // Pattern 5: African-inspired
-        intArrayOf(0, 3, 5, 0, 3, 7, 5, 3),
-        // Pattern 6: Ascending spiral
-        intArrayOf(0, 1, 2, 0, 1, 2, 3, 1, 2, 3, 4, 2),
-        // Pattern 7: Long pattern
-        intArrayOf(0, 2, 4, 5, 4, 2, 0, -1, 0, 2, 4, 7, 4, 2, 0, -2)
+        intArrayOf(0, 1, 2, 1, 0, -1, 0, 2),     // PHASE STEPS: célula por graus conjuntos
+        intArrayOf(0, 4, 1, 5, 2, 6, 3, 0),      // ADD FIFTHS: arpejo de quintas
+        intArrayOf(0, 1, 3, 5, 3, 1, 0, -1),     // HOCKET MODAL: figura modal
+        intArrayOf(0, 2, 4, 5, 7, 5, 4, 2),      // SUBSTITUTION: célula modal ampla
+        intArrayOf(0, 2, 4, 6, 4, 2, 0, 2),      // PHASE CHORD: acorde com sétima
+        intArrayOf(0, 4, 2, 6, 3, -1, 1, 5),     // ADD WAVE: curva de intervalos abertos
+        intArrayOf(0, 6, 2, 4, 6, 2, 0, 4),      // HOCKET MAJ7: cor de sétima maior
+        intArrayOf(0, 5, 2, 7, -2, 6, 1, 4)      // SUBST WIDE: intervalos largos
     )
 
     // Internal state
@@ -53,6 +46,7 @@ class MinimalEngine : CompositionEngine {
     private var lastGeneratedTick: Long = -1L
     private var generationCount: Int = 0
     private var initialized: Boolean = false
+    private var currentMaterialIndex: Int = -1
     private var additionIndex: Int = 0           // For addition process
     private var subtractionIndex: Int = 0        // For subtraction process
     private var substitutionMap: BooleanArray = BooleanArray(16) { true }
@@ -60,23 +54,37 @@ class MinimalEngine : CompositionEngine {
 
     override fun generate(tick: Long, state: EngineState, random: Random): List<NoteEvent> {
         val params = state.params
-        val interval = getTickInterval(params.density)
+        // TENSION acima de 60%: o pulso dobra de velocidade (colcheias -> semicolcheias)
+        val interval = if (params.tension > 0.6f) RhythmUtils.SIXTEENTH else RhythmUtils.EIGHTH
 
         if (tick % interval != 0L) return emptyList()
         if (tick == lastGeneratedTick) return emptyList()
         lastGeneratedTick = tick
+
+        // Padrão por compasso: a célula recomeça no início de cada compasso
+        if (tick % state.music.meter.barTicks == 0L) {
+            for (v in 0 until 4) voicePositions[v] = 0
+        }
 
         if (!initialized) {
             initialize(state, random)
             initialized = true
         }
 
-        val process = getProcess(params.morph)
+        // MATERIAL escolhe a célula e, com ela, o procedimento; a troca de Material recomeça o processo
+        val materialIndex = MaterialCatalog.index(CompositionalLanguage.MINIMAL, params.material)
+        if (materialIndex != currentMaterialIndex) {
+            initialize(state, random)
+            currentMaterialIndex = materialIndex
+        }
+        val process = getProcess(params.material)
         val events = mutableListOf<NoteEvent>()
 
         // Advance process at rate controlled by growth
         processTickCounter++
-        val processRate = (4 + (1f - params.growth) * 28).toInt().coerceIn(4, 32)
+        // MEMORY: um passo do processo a cada 1 a 13 compassos
+        val stepsPerBar = (state.music.meter.barTicks / interval).coerceAtLeast(1)
+        val processRate = (1 + (params.memory * 12f).toInt()) * stepsPerBar
         if (processTickCounter >= processRate) {
             processTickCounter = 0
             advanceProcess(process, state, random)
@@ -102,7 +110,20 @@ class MinimalEngine : CompositionEngine {
         }
 
         generationCount++
-        return events
+
+        // DENSITY: proporção das notas da célula realmente tocadas (35 a 100%);
+        // MEMORY > 72%: durações dobradas; TENSION > 58%: um semitom em cerca de 14% das notas
+        val played = ArrayList<NoteEvent>(events.size)
+        for (e in events) {
+            if (random.nextFloat() >= 0.35f + 0.65f * params.density) continue
+            var out = e
+            if (params.memory > 0.72f) out = out.copy(durationTicks = out.durationTicks * 2)
+            if (params.tension > 0.58f && random.nextFloat() < 0.14f) {
+                out = out.copy(midiNote = (out.midiNote + 1).coerceAtMost(127))
+            }
+            played.add(out)
+        }
+        return played
     }
 
     override fun reset() {
@@ -115,6 +136,7 @@ class MinimalEngine : CompositionEngine {
         lastGeneratedTick = -1L
         generationCount = 0
         initialized = false
+        currentMaterialIndex = -1
         additionIndex = 0
         subtractionIndex = 0
         substitutionMap = BooleanArray(16) { true }
@@ -124,9 +146,11 @@ class MinimalEngine : CompositionEngine {
     // --- Initialization ---
 
     private fun initialize(state: EngineState, random: Random) {
-        val patternIndex = (state.params.material * (basePatterns.size - 1)).toInt()
+        val patternIndex = MaterialCatalog.index(CompositionalLanguage.MINIMAL, state.params.material)
             .coerceIn(0, basePatterns.size - 1)
-        currentPattern = basePatterns[patternIndex].copyOf()
+        // GROWTH: tamanho da célula, de 4 a 8 posições
+        val cellLength = (4 + (state.params.growth * 4f).toInt()).coerceIn(4, 8)
+        currentPattern = basePatterns[patternIndex].take(cellLength).toIntArray()
 
         // Initialize voice phases
         for (v in 0 until 4) {
@@ -161,13 +185,13 @@ class MinimalEngine : CompositionEngine {
 
     // --- Process selection ---
 
-    private fun getProcess(morph: Float): MinimalProcess {
-        return when {
-            morph < 0.2f -> MinimalProcess.PHASE_SHIFTING
-            morph < 0.4f -> MinimalProcess.ADDITION
-            morph < 0.6f -> MinimalProcess.SUBTRACTION
-            morph < 0.8f -> MinimalProcess.SUBSTITUTION
-            else -> MinimalProcess.HOCKET
+    /** PHASE (fase), ADD (aditivo), HOCKET e SUBSTITUTION, na ordem dos 8 Materials. */
+    private fun getProcess(material: Float): MinimalProcess {
+        return when (MaterialCatalog.index(CompositionalLanguage.MINIMAL, material) % 4) {
+            0 -> MinimalProcess.PHASE_SHIFTING
+            1 -> MinimalProcess.ADDITION
+            2 -> MinimalProcess.HOCKET
+            else -> MinimalProcess.SUBSTITUTION
         }
     }
 

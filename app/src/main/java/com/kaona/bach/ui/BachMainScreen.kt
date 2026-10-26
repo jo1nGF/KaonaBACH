@@ -50,10 +50,80 @@ fun BachMainScreen(viewModel: BachViewModel) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Main content: Knobs + Display
+        // VISOR AZUL: todas as páginas aparecem aqui dentro
+        DisplayHost(
+            page = state.page,
+            onPageSelect = { viewModel.setPage(it) }
+        ) {
+            when (state.page) {
+                0 -> HomePage(
+                    state = state,
+                    onLanguageSelect = { viewModel.setLanguage(it) },
+                    onPartnerSelect = { viewModel.setGroovePartner(it) }
+                )
+                1 -> MusicPanel(
+                    music = state.music,
+                    rootNote = state.rootNote,
+                    onRootChange = { viewModel.setRoot(it) },
+                    onChange = { transform -> viewModel.updateMusic(transform) }
+                )
+                2 -> SequencePanel(
+                    sequence = state.sequence,
+                    language = state.currentLanguage,
+                    isPlaying = state.isPlaying,
+                    playingStep = state.playingStep,
+                    currentChord = state.currentChord,
+                    onStepChange = { index, step -> viewModel.updateSequenceStep(index, step) },
+                    onEnabledChange = { viewModel.setSequenceEnabled(it) },
+                    onClear = { viewModel.clearSequence() },
+                    onLoadFactory = { form, speed -> viewModel.loadFactorySequence(form, speed) },
+                    onLoadUser = { viewModel.loadUserSequence(it) },
+                    onSaveUser = { viewModel.saveUserSequence(it) }
+                )
+                3 -> MidiInPanel(
+                    settings = state.midiIn,
+                    learning = state.learning,
+                    monitor = viewModel.midiMonitor,
+                    onClockEnabled = { viewModel.setClockEnabled(it) },
+                    onResetOnStop = { viewModel.setResetOnStop(it) },
+                    onRootChannel = { viewModel.setRootChannel(it) },
+                    onAssign = { command, assign -> viewModel.setAssign(command, assign) },
+                    onClear = { viewModel.clearAssign(it) },
+                    onLearn = { viewModel.startLearn(it) }
+                )
+                4 -> ControlsPanel(state = state)
+                5 -> VisualPanel(state = state, signals = viewModel.signals)
+                6 -> SettingsPanel(
+                    rootNote = state.rootNote,
+                    scale = state.scale,
+                    ornaments = state.ornaments,
+                    breakCharacter = state.breakCharacter,
+                    breakBars = state.breakBars,
+                    breakLive = state.breakLive,
+                    midiChannels = state.midiChannels,
+                    onRootChange = { viewModel.setRoot(it) },
+                    onScaleChange = { viewModel.setScale(it) },
+                    onOrnamentsChange = { viewModel.setOrnaments(it) },
+                    onBreakCharChange = { viewModel.setBreakCharacter(it) },
+                    onBreakBarsChange = { viewModel.setBreakBars(it) },
+                    onBreakLive = { viewModel.setBreakLive() },
+                    onMidiChannelChange = { track, ch -> viewModel.setMidiChannel(track, ch) }
+                )
+                else -> PresetsPanel(
+                    currentIndex = state.presetIndex,
+                    onLoadPreset = { viewModel.loadPreset(it) },
+                    onSavePreset = { idx, name -> viewModel.savePreset(idx, name) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Knobs + BPM + presets
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             // Left column: Parameter knobs
             Column(
@@ -137,22 +207,8 @@ fun BachMainScreen(viewModel: BachViewModel) {
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                BachDisplay(
-                    bpm = state.bpm,
-                    language = state.currentLanguage,
-                    channels = state.midiChannels,
-                    trackActivity = state.trackActivity,
-                    currentBar = state.currentBar,
-                    currentBeat = state.currentBeat,
-                    isPlaying = state.isPlaying,
-                    isBreakActive = state.isBreakActive,
-                    materialName = MaterialCatalog.name(state.currentLanguage, state.material),
-                    externalClock = state.externalClock,
-                    beatsPerBar = state.music.meter.barTicks / state.music.meter.beatTicks
-                )
-
                 BpmControl(
                     bpm = state.bpm,
                     onBpmChange = { viewModel.setBpm(it) }
@@ -163,7 +219,7 @@ fun BachMainScreen(viewModel: BachViewModel) {
                     presetName = state.presetName,
                     onPrev = { viewModel.prevPreset() },
                     onNext = { viewModel.nextPreset() },
-                    onPresetTap = { viewModel.togglePresets() }
+                    onPresetTap = { viewModel.setPage(7) }
                 )
             }
         }
@@ -183,111 +239,10 @@ fun BachMainScreen(viewModel: BachViewModel) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        if (state.showSettings) {
-            SettingsPanel(
-                rootNote = state.rootNote,
-                scale = state.scale,
-                ornaments = state.ornaments,
-                breakCharacter = state.breakCharacter,
-                breakBars = state.breakBars,
-                breakLive = state.breakLive,
-                midiChannels = state.midiChannels,
-                onRootChange = { viewModel.setRoot(it) },
-                onScaleChange = { viewModel.setScale(it) },
-                onOrnamentsChange = { viewModel.setOrnaments(it) },
-                onBreakCharChange = { viewModel.setBreakCharacter(it) },
-                onBreakBarsChange = { viewModel.setBreakBars(it) },
-                onBreakLive = { viewModel.setBreakLive() },
-                onMidiChannelChange = { track, ch -> viewModel.setMidiChannel(track, ch) }
-            )
-        }
-
-        if (state.showSequence) {
-            SequencePanel(
-                sequence = state.sequence,
-                language = state.currentLanguage,
-                isPlaying = state.isPlaying,
-                playingStep = state.playingStep,
-                currentChord = state.currentChord,
-                onStepChange = { index, step -> viewModel.updateSequenceStep(index, step) },
-                onEnabledChange = { viewModel.setSequenceEnabled(it) },
-                onClear = { viewModel.clearSequence() },
-                onLoadFactory = { form, speed -> viewModel.loadFactorySequence(form, speed) },
-                onLoadUser = { viewModel.loadUserSequence(it) },
-                onSaveUser = { viewModel.saveUserSequence(it) }
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        when (state.toolPage) {
-            1 -> {
-                MusicPanel(
-                    music = state.music,
-                    rootNote = state.rootNote,
-                    onRootChange = { viewModel.setRoot(it) },
-                    onChange = { transform -> viewModel.updateMusic(transform) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            2 -> {
-                MidiInPanel(
-                    settings = state.midiIn,
-                    learning = state.learning,
-                    monitor = viewModel.midiMonitor,
-                    onClockEnabled = { viewModel.setClockEnabled(it) },
-                    onResetOnStop = { viewModel.setResetOnStop(it) },
-                    onRootChannel = { viewModel.setRootChannel(it) },
-                    onAssign = { command, assign -> viewModel.setAssign(command, assign) },
-                    onClear = { viewModel.clearAssign(it) },
-                    onLearn = { viewModel.startLearn(it) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            3 -> {
-                ControlsPanel(state = state)
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            4 -> {
-                VisualPanel(state = state, signals = viewModel.signals)
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-            else -> {}
-        }
-
-        if (state.showPresets) {
-            PresetsPanel(
-                currentIndex = state.presetIndex,
-                onLoadPreset = { viewModel.loadPreset(it) },
-                onSavePreset = { idx, name -> viewModel.savePreset(idx, name) }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        ToolsRow(activePage = state.toolPage, onSelect = { viewModel.setToolPage(it) })
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        LanguageSelector(
-            currentLanguage = state.currentLanguage,
-            onLanguageSelect = { viewModel.setLanguage(it) }
-        )
-
-        if (state.currentLanguage == CompositionalLanguage.GROOVE_MIX) {
-            Spacer(modifier = Modifier.height(6.dp))
-            GroovePartnerRow(
-                current = state.groovePartner,
-                onSelect = { viewModel.setGroovePartner(it) }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
         BottomBar(
             isMidiConnected = state.isMidiConnected,
-            onSettingsToggle = { viewModel.toggleSettings() },
-            onSequenceToggle = { viewModel.toggleSequence() }
+            onSettingsToggle = { viewModel.setPage(6) },
+            onSequenceToggle = { viewModel.setPage(2) }
         )
     }
 }

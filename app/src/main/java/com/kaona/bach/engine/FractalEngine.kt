@@ -22,7 +22,11 @@ class FractalEngine : CompositionEngine {
         FIBONACCI,       // Fibonacci sequence mapped to pitches
         THUE_MORSE,      // Thue-Morse sequence for rhythm
         SIERPINSKI,      // Sierpinski triangle for voice distribution
-        LOGISTIC_MAP     // Logistic map chaos/bifurcation
+        LOGISTIC_MAP,    // Logistic map chaos/bifurcation
+        BASE4,           // Dígitos da posição em base quatro, em vários níveis
+        ONE_OVER_F,      // Camadas binárias de amplitude decrescente (1/f aditivo)
+        RULER,           // Função "régua": divisibilidade dos passos por potências de dois
+        DRAGON           // Sequência de dobra de papel (curva do dragão)
     }
 
     // --- Fibonacci state ---
@@ -63,12 +67,27 @@ class FractalEngine : CompositionEngine {
         }
 
         val algorithm = getAlgorithm(params.material)
+
+        // INTERACTION: de vozes independentes (posições distantes) até as quatro lendo a mesma posição
+        val gap = ((1f - params.interaction) * 6f).toInt()
+        for (v in 1 until 4) voicePositions[v] = voicePositions[0] + v * gap
+
+        // MEMORY: escala de leitura; quanto mais alta, mais devagar a posição avança
+        val readScale = 1 + (params.memory * 3f).toInt()
+        val advance = generationCount % readScale == 0
+        val savedPositions = voicePositions.copyOf()
+
         val events = when (algorithm) {
             FractalAlgorithm.FIBONACCI -> generateFibonacci(tick, state, random)
             FractalAlgorithm.THUE_MORSE -> generateThueMorse(tick, state, random)
             FractalAlgorithm.SIERPINSKI -> generateSierpinski(tick, state, random)
             FractalAlgorithm.LOGISTIC_MAP -> generateLogisticMap(tick, state, random)
+            FractalAlgorithm.BASE4,
+            FractalAlgorithm.ONE_OVER_F,
+            FractalAlgorithm.RULER,
+            FractalAlgorithm.DRAGON -> generateLevels(algorithm, tick, state, random)
         }
+        if (!advance) voicePositions = savedPositions
 
         generationCount++
         return events
@@ -402,8 +421,10 @@ class FractalEngine : CompositionEngine {
 
             // Map x (0-1) to scale degree
             val scaleSize = state.scale.degrees.size.coerceAtLeast(1)
-            val totalRange = scaleSize * 2 // Two octaves
-            val degree = (logisticX * totalRange).toInt() - scaleSize / 2
+            // GROWTH: extensão das alturas, de 6 a 18 semitons
+            val semitoneRange = 6f + params.growth * 12f
+            val totalRange = (semitoneRange * scaleSize / 12f).toInt().coerceAtLeast(2)
+            val degree = (logisticX * totalRange).toInt() - totalRange / 2
 
             val baseOctave = 5 - v
             val midiNote = scaleDegreeToMidi(degree, state.rootNote, state.scale, baseOctave)
@@ -446,16 +467,115 @@ class FractalEngine : CompositionEngine {
 
     // --- Algorithm selection ---
 
+    /** Ordem do manual: THUE-MORSE, LOGISTIC, BASE-4, 1/F ADDITIVE, RULER, SIERPINSKI, FIBONACCI, DRAGON. */
     private fun getAlgorithm(material: Float): FractalAlgorithm {
-        return when {
-            material < 0.25f -> FractalAlgorithm.FIBONACCI
-            material < 0.5f -> FractalAlgorithm.THUE_MORSE
-            material < 0.75f -> FractalAlgorithm.SIERPINSKI
-            else -> FractalAlgorithm.LOGISTIC_MAP
+        return when (MaterialCatalog.index(CompositionalLanguage.FRACTAL, material)) {
+            0 -> FractalAlgorithm.THUE_MORSE
+            1 -> FractalAlgorithm.LOGISTIC_MAP
+            2 -> FractalAlgorithm.BASE4
+            3 -> FractalAlgorithm.ONE_OVER_F
+            4 -> FractalAlgorithm.RULER
+            5 -> FractalAlgorithm.SIERPINSKI
+            6 -> FractalAlgorithm.FIBONACCI
+            else -> FractalAlgorithm.DRAGON
         }
     }
 
-    // --- Utility ---
+    /**
+     * BASE-4, 1/F ADDITIVE, RULER e DRAGON: sequências lidas por vários níveis sobrepostos.
+     *  - GROWTH: número de níveis (1 a 5);
+     *  - MEMORY: escala de leitura (a posição avança um passo a cada 1 a 8 gerações);
+     *  - INTERACTION: distância de leitura entre as vozes (no máximo, as quatro leem a mesma posição);
+     *  - MORPH (BASE-4): acima de 44% complementa os dígitos; acima de 76% inverte um nível sim, outro não;
+     *  - TENSION: acima de 56%, um semitom em cerca de 16% das notas;
+     *  - DENSITY: probabilidade de cada voz emitir uma nota.
+     */
+    private fun generateLevels(
+        algorithm: FractalAlgorithm,
+        tick: Long,
+        state: EngineState,
+        random: Random
+    ): List<NoteEvent> {
+        val events = mutableListOf<NoteEvent>()
+        val params = state.params
+
+        val levels = 1 + (params.growth * 4f).toInt().coerceIn(0, 4)
+        val readScale = 1 + (params.memory * 7f).toInt()
+        val base = generationCount / readScale
+        val gap = ((1f - params.interaction) * 6f).toInt()
+        val playProbability = 0.2f + 0.8f * params.density
+
+        for (v in 0 until 4) {
+            if (state.trackMutes.getOrElse(v) { false }) continue
+            if (random.nextFloat() > playProbability) continue
+
+            val n = base + v * gap
+            var degree = 0
+            var accent = 0
+
+            when (algorithm) {
+                FractalAlgorithm.BASE4 -> {
+                    for (level in 0 until levels) {
+                        var digit = (n shr (2 * level)) and 3
+                        if (params.morph > 0.44f) digit = 3 - digit
+                        if (params.morph > 0.76f && level % 2 == 1) digit = 3 - digit
+                        degree += (digit - 1) * (levels - level)
+                        accent += digit
+                    }
+                }
+                FractalAlgorithm.ONE_OVER_F -> {
+                    for (level in 0 until levels) {
+                        val bit = (n shr level) and 1
+                        degree += (if (bit == 1) 1 else -1) * (levels - level)
+                        accent += bit
+                    }
+                }
+                FractalAlgorithm.RULER -> {
+                    val ruler = Integer.numberOfTrailingZeros(n + 1)
+                    val side = if (((n + 1) shr (ruler + 1)) and 1 == 1) 1 else -1
+                    degree = side * ruler * 2
+                    accent = ruler
+                }
+                else -> { // DRAGON: contorno acumulado da sequência de dobra de papel
+                    val limit = n % 1024
+                    var contour = 0
+                    var lastTurn = 1
+                    for (i in 1..limit) {
+                        val low = i and -i
+                        lastTurn = if (((i / low) shr 1) and 1 == 0) 1 else -1
+                        contour += lastTurn
+                    }
+                    degree = contour.coerceIn(-levels * 2, levels * 2)
+                    accent = if (lastTurn == 1) 2 else 0
+                }
+            }
+
+            val baseOctave = 5 - v
+            var midiNote = scaleDegreeToMidi(degree, state.rootNote, state.scale, baseOctave)
+            if (params.tension > 0.56f && random.nextFloat() < 0.16f) {
+                midiNote += if (random.nextBoolean()) 1 else -1
+            }
+
+            val baseVelocity = (62 + accent * 4 + (params.tension * 25).toInt() - v * 5).coerceIn(35, 115)
+            val duration = when {
+                accent >= 3 -> RhythmUtils.HALF
+                accent == 2 -> RhythmUtils.QUARTER
+                else -> RhythmUtils.EIGHTH
+            }
+
+            events.add(
+                NoteEvent(
+                    track = v,
+                    midiNote = midiNote.coerceIn(0, 127),
+                    velocity = RhythmUtils.humanizeVelocity(baseVelocity, params.humanize),
+                    durationTicks = duration,
+                    startTick = tick,
+                    modValue = (40 + accent * 12).coerceIn(0, 127)
+                )
+            )
+        }
+        return events
+    }
 
     private fun scaleDegreeToMidi(
         degree: Int,

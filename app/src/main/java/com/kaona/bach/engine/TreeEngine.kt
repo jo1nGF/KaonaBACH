@@ -1,394 +1,221 @@
 package com.kaona.bach.engine
 
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 import java.util.Random
 
 /**
- * TreeEngine - Implements L-system (Lindenmayer system) based music generation.
- * Uses axioms and production rules to generate strings, then interprets them
- * as musical instructions using turtle graphics metaphor.
+ * TreeEngine: sistemas de Lindenmayer (L-systems) transformados em linhas melódicas.
+ * Parte de um axioma e substitui todos os símbolos ao mesmo tempo, em cada passo, segundo as regras
+ * da "espécie" escolhida em MATERIAL. A estrutura resultante é lida como um percurso musical:
+ *   F = nota (um passo adiante)   + e - = vira para cima ou para baixo
+ *   [ = guarda a posição (ramo)   ] = volta à posição guardada     | = inverte a direção
+ * As oito espécies são determinísticas: com os mesmos ajustes, a mesma árvore e a mesma linha.
  *
- * F = step forward (move up in scale)
- * f = step forward smaller (half step up)
- * + = turn right (interval up)
- * - = turn left (interval down)
- * [ = push state (save current position)
- * ] = pop state (return to saved position)
- * A,B = variables for rule expansion
+ *  - MEMORY:      acima de 60%, o percurso desacelera um passo.
+ *  - GROWTH:      profundidade de reescrita, de 2 a 6 passos (cada mudança reconstrói a árvore);
+ *                 acima de 78%, todas as notas ficam em semicolcheias.
+ *  - MORPH:       acima de 50%, os intervalos são invertidos em uma voz sim, outra não.
+ *  - DENSITY:     proporção de eventos tocados, de 40 a 98%; acima de 60%, o percurso avança uma
+ *                 nota a cada passo em vez de uma a cada dois passos.
+ *  - TENSION:     acima de 55%, um semitom em cerca de 16% das notas; aumenta a velocity.
+ *  - INTERACTION: distância de leitura entre as vozes (no máximo, as quatro leem o mesmo ponto);
+ *                 também define a abertura dos registros.
  */
 class TreeEngine : CompositionEngine {
 
-    /**
-     * L-system rule set with axiom and production rules.
-     */
-    private data class LSystemRuleSet(
+    private class Species(
         val name: String,
         val axiom: String,
-        val rules: Map<Char, String>
+        val rules: Map<Char, String>,
+        val registerBias: Int = 0,
+        val startDirection: Int = 1
     )
 
-    /**
-     * Turtle state for interpretation.
-     */
-    private data class TurtleState(
-        var degree: Int,       // Current scale degree
-        var direction: Int,    // +1 ascending, -1 descending
-        var velocity: Int,     // Current velocity
-        var octaveOffset: Int  // Octave transposition
+    private class Turtle(var degree: Int, var direction: Int) {
+        fun copyFrom(other: Turtle) {
+            degree = other.degree
+            direction = other.direction
+        }
+    }
+
+    private val species = listOf(
+        // CANOPY: regra muito ramificada, copa densa com muitos retornos de ramos
+        Species("CANOPY", "F", mapOf('F' to "F[+F]F[-F]F")),
+        // TENDRIL: o crescimento alterna extensões e pequenos ramos ascendentes
+        Species("TENDRIL", "F", mapOf('F' to "FF[+F]")),
+        // ZIGZAG: a linha muda de direção com regularidade, figura angular
+        Species("ZIGZAG", "F", mapOf('F' to "F+F-F")),
+        // FERN: sistema assimétrico, ramos deslocados
+        Species("FERN", "F", mapOf('F' to "F[+F]F[-F[+F]]")),
+        // CORAL: bifurcações repetidas e muitas duplicações
+        Species("CORAL", "F", mapOf('F' to "FF[+F][-F]")),
+        // VINE: laço e ramificações laterais
+        Species("VINE", "F", mapOf('F' to "F+F[-F]-F")),
+        // FORK: percursos simétricos
+        Species("FORK", "F", mapOf('F' to "F[+F][-F]")),
+        // ROOTS: ramos descendentes, favorecendo o registro grave
+        Species("ROOTS", "F", mapOf('F' to "F[-F]-F[-F]"), registerBias = -12, startDirection = -1)
     )
 
-    // Preset L-system rule sets
-    private val presetRules = listOf(
-        // 0: Simple branching (tree-like)
-        LSystemRuleSet(
-            name = "Tree",
-            axiom = "F",
-            rules = mapOf(
-                'F' to "F[+F]F[-F]F"
-            )
-        ),
-        // 1: Koch curve variant
-        LSystemRuleSet(
-            name = "Koch",
-            axiom = "F",
-            rules = mapOf(
-                'F' to "F+F-F-F+F"
-            )
-        ),
-        // 2: Dragon curve
-        LSystemRuleSet(
-            name = "Dragon",
-            axiom = "FA",
-            rules = mapOf(
-                'A' to "A+BF+",
-                'B' to "-FA-B"
-            )
-        ),
-        // 3: Sierpinski triangle
-        LSystemRuleSet(
-            name = "Sierpinski",
-            axiom = "A",
-            rules = mapOf(
-                'A' to "B-A-B",
-                'B' to "A+B+A"
-            )
-        ),
-        // 4: Plant-like
-        LSystemRuleSet(
-            name = "Plant",
-            axiom = "A",
-            rules = mapOf(
-                'A' to "F[+A][-A]FA",
-                'F' to "FF"
-            )
-        ),
-        // 5: Algae growth
-        LSystemRuleSet(
-            name = "Algae",
-            axiom = "A",
-            rules = mapOf(
-                'A' to "AB",
-                'B' to "A"
-            )
-        ),
-        // 6: Binary tree
-        LSystemRuleSet(
-            name = "Binary",
-            axiom = "A",
-            rules = mapOf(
-                'A' to "B[+A]-A",
-                'B' to "BB"
-            )
-        ),
-        // 7: Penrose tiling inspired
-        LSystemRuleSet(
-            name = "Penrose",
-            axiom = "F++F++F++F++F",
-            rules = mapOf(
-                'F' to "F++F++F|F-F++F"
-            )
-        ),
-        // 8: Hilbert curve
-        LSystemRuleSet(
-            name = "Hilbert",
-            axiom = "A",
-            rules = mapOf(
-                'A' to "-BF+AFA+FB-",
-                'B' to "+AF-BFB-FA+"
-            )
-        ),
-        // 9: Musical ladder
-        LSystemRuleSet(
-            name = "Ladder",
-            axiom = "F+F",
-            rules = mapOf(
-                'F' to "F+F-F"
-            )
-        )
-    )
-
-    // Internal state
-    private var currentString: String = ""
-    private var stringPosition: Int = 0
-    private var turtleState: TurtleState = TurtleState(0, 1, 80, 0)
-    private val stateStack: MutableList<TurtleState> = mutableListOf()
-    private var lastGeneratedTick: Long = -1L
-    private var generationCount: Int = 0
-    private var currentIteration: Int = 0
-    private var initialized: Boolean = false
-    private var voiceReadPositions: IntArray = IntArray(4) { 0 }
-    private var voiceTurtles: Array<TurtleState> = Array(4) { TurtleState(0, 1, 80, 0) }
-    private val voiceStateStacks: Array<MutableList<TurtleState>> = Array(4) { mutableListOf() }
+    private var currentString = ""
+    private var builtKey = -1
+    private var stepCounter = 0
+    private var lastStepTick = -1L
+    private var readPositions = IntArray(4)
+    private val turtles = Array(4) { Turtle(0, 1) }
+    private val stacks: Array<MutableList<Turtle>> = Array(4) { mutableListOf() }
 
     override fun generate(tick: Long, state: EngineState, random: Random): List<NoteEvent> {
-        val params = state.params
-        val interval = getTickInterval(params.density)
+        if (tick % RhythmUtils.SIXTEENTH != 0L) return emptyList()
+        if (tick == lastStepTick) return emptyList()
+        lastStepTick = tick
 
-        if (tick % interval != 0L) return emptyList()
-        if (tick == lastGeneratedTick) return emptyList()
-        lastGeneratedTick = tick
-
-        if (!initialized) {
-            initialize(state, random)
-            initialized = true
+        val p = state.params
+        val speciesIndex = MaterialCatalog.index(CompositionalLanguage.TREE, p.material).coerceIn(0, species.size - 1)
+        val depth = 2 + (p.growth * 4f).toInt()
+        val key = speciesIndex * 10 + depth
+        if (key != builtKey) {
+            rebuild(species[speciesIndex], depth)
+            builtKey = key
         }
-
         if (currentString.isEmpty()) return emptyList()
 
-        val events = mutableListOf<NoteEvent>()
+        // MEMORY (> 60%) desacelera um passo; DENSITY (> 60%) avança a cada passo, senão a cada dois
+        val interval = (if (p.density > 0.6f) 1 else 2) + (if (p.memory > 0.6f) 1 else 0)
+        val advance = stepCounter % interval == 0
+        stepCounter++
+        if (!advance) return emptyList()
+
+        val length = currentString.length
+        // INTERACTION: distância de leitura entre as vozes
+        val readGap = ((1f - p.interaction) * 24f).toInt()
+        for (v in 1 until 4) readPositions[v] = (readPositions[0] + v * readGap) % length
+
+        val sp = species[speciesIndex]
+        val playProbability = 0.40f + 0.58f * p.density
+        val spacing = 8 + ((1f - p.interaction) * 8f).toInt() // abertura dos registros
+        val events = ArrayList<NoteEvent>(4)
 
         for (v in 0 until 4) {
-            if (state.trackMutes.getOrElse(v) { false }) continue
+            val turtle = turtles[v]
+            val stack = stacks[v]
+            var pos = readPositions[v]
+            var processed = 0
+            var produced = false
 
-            val readPos = voiceReadPositions[v]
-            val turtle = voiceTurtles[v]
-            val stack = voiceStateStacks[v]
-
-            // Process characters until we find a note-producing one
-            var charsProcessed = 0
-            val maxCharsPerTick = 4 // Prevent infinite loops
-            var noteProduced = false
-
-            while (!noteProduced && charsProcessed < maxCharsPerTick) {
-                val charIndex = (readPos + charsProcessed) % currentString.length
-                val ch = currentString[charIndex]
-
-                when (ch) {
+            while (!produced && processed < 6) {
+                when (currentString[pos % length]) {
                     'F' -> {
-                        // Step forward: produce a note, move up in scale
                         turtle.degree += turtle.direction
-                        noteProduced = true
-                    }
-                    'f' -> {
-                        // Small step
-                        turtle.degree += turtle.direction
-                        noteProduced = true
-                    }
-                    'A', 'B' -> {
-                        // Variables also produce notes
-                        val varStep = if (ch == 'A') 1 else 2
-                        turtle.degree += turtle.direction * varStep
-                        noteProduced = true
+                        produced = true
                     }
                     '+' -> {
-                        // Turn right: interval up
                         turtle.degree += 1
                         turtle.direction = 1
                     }
                     '-' -> {
-                        // Turn left: interval down
                         turtle.degree -= 1
                         turtle.direction = -1
                     }
-                    '[' -> {
-                        // Push state
-                        stack.add(turtle.copy())
-                    }
+                    '[' -> stack.add(Turtle(turtle.degree, turtle.direction))
                     ']' -> {
-                        // Pop state
-                        if (stack.isNotEmpty()) {
-                            val restored = stack.removeAt(stack.size - 1)
-                            turtle.degree = restored.degree
-                            turtle.direction = restored.direction
-                            turtle.velocity = restored.velocity
-                            turtle.octaveOffset = restored.octaveOffset
-                        }
+                        if (stack.isNotEmpty()) turtle.copyFrom(stack.removeAt(stack.size - 1))
                     }
-                    '|' -> {
-                        // Reverse direction
-                        turtle.direction *= -1
-                    }
+                    '|' -> turtle.direction = -turtle.direction
                 }
-                charsProcessed++
+                pos++
+                processed++
             }
+            readPositions[v] = pos % length
 
-            voiceReadPositions[v] = (readPos + charsProcessed) % currentString.length
+            if (!produced) continue
+            if (state.trackMutes.getOrElse(v) { false }) continue
+            if (hash(stepCounter, v, 1) >= playProbability) continue
 
-            if (noteProduced) {
-                // Clamp degree to reasonable range
-                val scaleSize = state.scale.degrees.size.coerceAtLeast(1)
-                if (turtle.degree > scaleSize * 3) turtle.degree -= scaleSize * 2
-                if (turtle.degree < -scaleSize * 2) turtle.degree += scaleSize * 2
+            val size = state.scale.intervals.size.coerceAtLeast(1)
+            if (turtle.degree > size * 3) turtle.degree -= size * 2
+            if (turtle.degree < -size * 2) turtle.degree += size * 2
 
-                val baseOctave = when (v) {
-                    0 -> 5
-                    1 -> 4
-                    2 -> 3
-                    3 -> 2
-                    else -> 4
-                }
-                val midiNote = scaleDegreeToMidi(
-                    turtle.degree,
-                    state.rootNote,
-                    state.scale,
-                    baseOctave + turtle.octaveOffset
+            // MORPH: inverte os intervalos de uma voz sim, outra não
+            var degree = turtle.degree
+            if (p.morph > 0.5f && v % 2 == 1) degree = -degree
+
+            val base = 72 - v * spacing + sp.registerBias
+            var midi = degreeToMidi(degree, state, base)
+            if (p.tension > 0.55f && hash(stepCounter, v, 7) < 0.16f) midi += 1
+
+            val velocity = RhythmUtils.humanizeVelocity(
+                (70 + (p.tension * 20f).toInt() - v * 5).coerceIn(35, 120), p.humanize, random
+            )
+            val duration = if (p.growth > 0.78f) RhythmUtils.SIXTEENTH else interval * RhythmUtils.SIXTEENTH
+
+            events.add(
+                NoteEvent(
+                    track = v,
+                    midiNote = midi.coerceIn(0, 127),
+                    velocity = velocity,
+                    durationTicks = duration,
+                    startTick = tick,
+                    modValue = (64 + (p.morph * 30f - 15f)).toInt().coerceIn(0, 127)
                 )
-
-                val velocity = RhythmUtils.humanizeVelocity(
-                    (turtle.velocity + (params.tension * 20).toInt() - v * 5).coerceIn(35, 120),
-                    params.humanize
-                )
-
-                val duration = when {
-                    params.growth > 0.7f -> RhythmUtils.QUARTER
-                    params.growth > 0.4f -> RhythmUtils.EIGHTH
-                    else -> RhythmUtils.SIXTEENTH
-                }
-
-                events.add(
-                    NoteEvent(
-                        track = v,
-                        midiNote = midiNote.coerceIn(0, 127),
-                        velocity = velocity,
-                        durationTicks = duration,
-                        startTick = RhythmUtils.humanizeTiming(tick, params.humanize),
-                        modValue = (64 + (params.morph * 30 - 15)).toInt().coerceIn(0, 127)
-                    )
-                )
-            }
+            )
         }
-
-        // Periodically re-iterate the L-system for development
-        generationCount++
-        val reiterateRate = (32 + (1f - params.growth) * 96).toInt().coerceIn(16, 128)
-        if (generationCount % reiterateRate == 0 && currentIteration < getMaxIterations(params.growth)) {
-            iterateLSystem(state)
-        }
-
         return events
     }
 
     override fun reset() {
         currentString = ""
-        stringPosition = 0
-        turtleState = TurtleState(0, 1, 80, 0)
-        stateStack.clear()
-        lastGeneratedTick = -1L
-        generationCount = 0
-        currentIteration = 0
-        initialized = false
-        voiceReadPositions = IntArray(4) { 0 }
-        voiceTurtles = Array(4) { TurtleState(0, 1, 80, 0) }
-        for (stack in voiceStateStacks) stack.clear()
-    }
-
-    // --- Initialization ---
-
-    private fun initialize(state: EngineState, random: Random) {
-        val params = state.params
-        val ruleSetIndex = (params.material * (presetRules.size - 1)).toInt()
-            .coerceIn(0, presetRules.size - 1)
-        val ruleSet = presetRules[ruleSetIndex]
-
-        currentString = ruleSet.axiom
-        currentIteration = 0
-
-        // Apply initial iterations
-        val initialIterations = (1 + params.growth * 3).toInt().coerceIn(1, 4)
-        repeat(initialIterations) {
-            iterateLSystem(state)
-        }
-
-        // Initialize voice turtles at different starting positions
+        builtKey = -1
+        stepCounter = 0
+        lastStepTick = -1L
+        readPositions = IntArray(4)
         for (v in 0 until 4) {
-            voiceTurtles[v] = TurtleState(
-                degree = v * 2,  // Stagger starting degrees
-                direction = if (v % 2 == 0) 1 else -1,
-                velocity = 80 - v * 5,
-                octaveOffset = 0
-            )
-            voiceReadPositions[v] = (v * currentString.length / 4) % currentString.length.coerceAtLeast(1)
-            voiceStateStacks[v].clear()
+            turtles[v].degree = 0
+            turtles[v].direction = 1
+            stacks[v].clear()
         }
     }
 
-    // --- L-system iteration ---
-
-    private fun iterateLSystem(state: EngineState) {
-        val params = state.params
-        val ruleSetIndex = (params.material * (presetRules.size - 1)).toInt()
-            .coerceIn(0, presetRules.size - 1)
-        val ruleSet = presetRules[ruleSetIndex]
-
-        val sb = StringBuilder()
-        for (ch in currentString) {
-            val replacement = ruleSet.rules[ch]
-            if (replacement != null) {
-                sb.append(replacement)
-            } else {
-                sb.append(ch)
+    /** Aplica as regras [depth] vezes (com limite de tamanho) e reposiciona as vozes. */
+    private fun rebuild(sp: Species, depth: Int) {
+        var s = sp.axiom
+        repeat(depth) {
+            val next = StringBuilder()
+            for (ch in s) {
+                next.append(sp.rules[ch] ?: ch.toString())
+                if (next.length > MAX_LENGTH) break
             }
+            s = if (next.length > MAX_LENGTH) next.substring(0, MAX_LENGTH) else next.toString()
         }
+        currentString = s
 
-        // Limit string length to prevent memory issues
-        val maxLength = 4096
-        currentString = if (sb.length > maxLength) {
-            sb.substring(0, maxLength)
-        } else {
-            sb.toString()
-        }
-
-        currentIteration++
-
-        // Adjust read positions to stay in bounds
+        readPositions = IntArray(4)
         for (v in 0 until 4) {
-            if (currentString.isNotEmpty()) {
-                voiceReadPositions[v] = voiceReadPositions[v] % currentString.length
-            }
+            turtles[v].degree = v * 2 // as vozes começam escalonadas
+            turtles[v].direction = if (v % 2 == 0) sp.startDirection else -sp.startDirection
+            stacks[v].clear()
         }
     }
 
-    private fun getMaxIterations(growth: Float): Int {
-        return (2 + growth * 5).toInt().coerceIn(2, 7)
+    private fun degreeToMidi(degree: Int, state: EngineState, base: Int): Int {
+        val degrees = state.scale.intervals
+        val size = degrees.size
+        val octave = Math.floorDiv(degree, size)
+        val idx = Math.floorMod(degree, size)
+        var midi = base + state.rootNote.midiBase + degrees[idx] + octave * 12
+        while (midi < 12) midi += 12
+        while (midi > 115) midi -= 12
+        return midi
     }
 
-    // --- Utility ---
-
-    private fun scaleDegreeToMidi(
-        degree: Int,
-        rootNote: NoteName,
-        scale: Scale,
-        baseOctave: Int
-    ): Int {
-        val degrees = scale.degrees
-        if (degrees.isEmpty()) return rootNote.midiValue + baseOctave * 12
-
-        val octaveSize = degrees.size
-        val octave = if (degree >= 0) degree / octaveSize else (degree - octaveSize + 1) / octaveSize
-        val degreeInScale = ((degree % octaveSize) + octaveSize) % octaveSize
-        val semitoneOffset = degrees[degreeInScale]
-
-        return (rootNote.midiValue + (baseOctave + octave) * 12 + semitoneOffset).coerceIn(0, 127)
+    /** Aleatoriedade determinística: os mesmos ajustes produzem a mesma execução. */
+    private fun hash(a: Int, b: Int, c: Int): Float {
+        var h = a * 374761393 + b * 668265263 + c * 1274126177
+        h = (h xor (h ushr 13)) * 1274126177
+        h = h xor (h ushr 16)
+        return (h and 0x7FFFFFFF) / 2147483647f
     }
 
-    private fun getTickInterval(density: Float): Int {
-        return when {
-            density > 0.8f -> RhythmUtils.SIXTEENTH
-            density > 0.6f -> RhythmUtils.EIGHTH
-            density > 0.3f -> RhythmUtils.QUARTER
-            else -> RhythmUtils.HALF
-        }
+    companion object {
+        private const val MAX_LENGTH = 600
     }
 }

@@ -1,5 +1,6 @@
 package com.kaona.bach.ui.components
 
+import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -36,12 +37,20 @@ fun ParameterKnob(
 ) {
     val colors = BachTheme.colors
 
-    // O pointerInput(Unit) só é criado uma vez; sem isso ele guardaria o valor
-    // e o callback da primeira composição e o knob travaria/voltaria ao arrastar.
-    val currentValue by rememberUpdatedState(value)
     val currentOnValueChange by rememberUpdatedState(onValueChange)
     val currentOnReset by rememberUpdatedState(onReset)
-    var dragValue by remember { mutableStateOf(value) }
+    val currentValue by rememberUpdatedState(value)
+
+    // O valor mostrado acompanha o dedo na hora, sem esperar a ida e volta pelo ViewModel e pela tela
+    // inteira; só o desenho do próprio knob é refeito a cada movimento.
+    var shown by remember { mutableFloatStateOf(value) }
+    val dragging = remember { BooleanArray(1) }
+    val lastEmit = remember { LongArray(1) }
+
+    // Mudanças vindas de fora (preset, MIDI CC, duplo toque) atualizam o knob quando não há dedo nele
+    LaunchedEffect(value) {
+        if (!dragging[0]) shown = value
+    }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -67,12 +76,28 @@ fun ParameterKnob(
                 }
                 .pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { dragValue = currentValue }
+                        onDragStart = {
+                            dragging[0] = true
+                            shown = currentValue
+                        },
+                        onDragEnd = {
+                            dragging[0] = false
+                            currentOnValueChange(shown) // valor final exato
+                        },
+                        onDragCancel = {
+                            dragging[0] = false
+                            currentOnValueChange(shown)
+                        }
                     ) { change, dragAmount ->
                         change.consume()
                         // Arrastar para cima aumenta, para baixo diminui
-                        dragValue = (dragValue - dragAmount.y / 300f).coerceIn(0f, 1f)
-                        currentOnValueChange(dragValue)
+                        shown = (shown - dragAmount.y / 300f).coerceIn(0f, 1f)
+                        // O motor recebe o valor a ~25 vezes por segundo: suave ao ouvido e leve para a tela
+                        val now = SystemClock.uptimeMillis()
+                        if (now - lastEmit[0] >= 40L) {
+                            lastEmit[0] = now
+                            currentOnValueChange(shown)
+                        }
                     }
                 }
         ) {
@@ -112,7 +137,7 @@ fun ParameterKnob(
 
                 // Value arc (gold) - from 225° to position
                 val startAngle = 135f // Bottom-left
-                val sweepAngle = value * 270f // 270° total range
+                val sweepAngle = shown * 270f // 270° total range (lido só na fase de desenho)
 
                 drawArc(
                     color = colors.accent.copy(alpha = 0.8f),
@@ -148,7 +173,7 @@ fun ParameterKnob(
         }
 
         Text(
-            text = "${(value * 100).toInt()}",
+            text = "${(shown * 100).toInt()}",
             color = colors.textSecondary,
             fontSize = 9.sp,
             textAlign = TextAlign.Center

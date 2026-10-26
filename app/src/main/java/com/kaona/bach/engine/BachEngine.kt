@@ -133,7 +133,10 @@ class BachEngine {
     private var breakStartTick: Long = 0
     private var breakEvents = mutableListOf<NoteEvent>()
 
-    fun getState(): EngineState = state
+    fun getState(): EngineState {
+        val s = state
+        return if (pendingParams.isEmpty()) s else s.copy(params = withPending(s.params, false))
+    }
 
     @Synchronized
     fun setOrnaments(amount: Float) {
@@ -170,6 +173,7 @@ class BachEngine {
 
     @Synchronized
     fun setState(newState: EngineState) {
+        pendingParams.clear()
         harmony.invalidate()
         // Carregar um preset troca os ajustes, mas não o transporte: continua tocando/pausado onde estava
         state = newState.copy(
@@ -182,19 +186,35 @@ class BachEngine {
         )
     }
 
-    @Synchronized
+    // Parâmetros dos 8 knobs: entram sem trava. A interface nunca espera o clock; o valor vale a partir
+    // do próximo tick (menos de 6 ms depois) e getState() já o enxerga.
+    private val pendingParams = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
     fun updateParam(param: String, value: Float) {
-        state = when (param) {
-            "material" -> state.copy(params = state.params.copy(material = value))
-            "memory" -> state.copy(params = state.params.copy(memory = value))
-            "growth" -> state.copy(params = state.params.copy(growth = value))
-            "morph" -> state.copy(params = state.params.copy(morph = value))
-            "density" -> state.copy(params = state.params.copy(density = value))
-            "tension" -> state.copy(params = state.params.copy(tension = value))
-            "interaction" -> state.copy(params = state.params.copy(interaction = value))
-            "humanize" -> state.copy(params = state.params.copy(humanize = value))
-            else -> state
+        when (param) {
+            "material", "memory", "growth", "morph", "density", "tension", "interaction", "humanize" ->
+                pendingParams[param] = value
         }
+    }
+
+    private fun withPending(base: BachParams, consume: Boolean): BachParams {
+        if (pendingParams.isEmpty()) return base
+        var p = base
+        for ((key, v) in pendingParams) {
+            p = when (key) {
+                "material" -> p.copy(material = v)
+                "memory" -> p.copy(memory = v)
+                "growth" -> p.copy(growth = v)
+                "morph" -> p.copy(morph = v)
+                "density" -> p.copy(density = v)
+                "tension" -> p.copy(tension = v)
+                "interaction" -> p.copy(interaction = v)
+                "humanize" -> p.copy(humanize = v)
+                else -> p
+            }
+            if (consume) pendingParams.remove(key, v)
+        }
+        return p
     }
 
     @Synchronized
@@ -297,6 +317,11 @@ class BachEngine {
     fun processTick(): List<NoteEvent> {
         if (!state.isPlaying) return emptyList()
 
+        // Parâmetros dos knobs recebidos desde o último tick
+        if (pendingParams.isNotEmpty()) {
+            state = state.copy(params = withPending(state.params, true))
+        }
+
         val currentTick = state.currentTick
         val meter = state.music.meter
         val ticksPerBar = meter.barTicks
@@ -347,7 +372,10 @@ class BachEngine {
         val ornamented = ornamentProcessor.process(durationed, currentTick, state)
 
         // SWING: a contratempo sai um pouco depois; o tempo seguinte continua no relógio
-        val swingDelay = MusicShaper.swingDelay(currentTick, state)
+        // Os Materials do GROOVE escritos em tercinas não são deformados uma segunda vez
+        val nativelyTernary = (state.language == CompositionalLanguage.GROOVE ||
+            state.language == CompositionalLanguage.GROOVE_MIX) && grooveEngine.isTernary(state.params.material)
+        val swingDelay = if (nativelyTernary) 0 else MusicShaper.swingDelay(currentTick, state)
         val onTime: List<NoteEvent> = if (swingDelay > 0 && ornamented.isNotEmpty()) {
             for (e in ornamented) ornamentProcessor.defer(e, currentTick, swingDelay)
             emptyList()

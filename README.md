@@ -145,3 +145,27 @@ O B.A.C.H. original é um produto comercial disponível em: https://www.kaona.fr
 - **MIDI IN**: clock externo (F8/FA/FB/FC), RESET ON STOP, nota que define o ROOT e atribuição de CCs com LEARN (padrão: canal 1, CC 16–27; ALGORITHM no CC 24).
 - **Autosave**: os ajustes são salvos continuamente e retomados ao abrir o app.
 - **BREAK LIVE**, escolha do parceiro do **GROOVE MIX**, páginas **CONTROLS** e **VISUAL**, modo **HARMONY** na SEQUENCE.
+
+## Linguagens revisadas (auditoria do manual)
+
+- **CANON**: 28 Materials (4 formas x 7 intervalos de imitação) e limiares de MORPH, GROWTH, INTERACTION, DENSITY, TENSION e MEMORY.
+- **FUGUE**: 8 famílias de sujeito; SYNCOPATED e CHORALE com ritmo próprio.
+- **PROBA**: caminhada melódica; Materials TONAL, ATONAL, PENTATONIC, BLUES, STEPWISE, FOURTHS, OCTATONIC e PEDAL.
+- **TINTINNABULI**: 8 caminhos da voz M (ARC, MIRROR, WAVE, ALINA, subindo e descendo); T-voices pelo acorde.
+- **MINIMAL**: o Material escolhe a célula e o procedimento (fase, aditivo, hocket, substituição); MEMORY dita a lentidão.
+- **CELLULAR**: regras R001-R254 ao vivo, cor harmônica por regra, MEMORY (inércia) e INTERACTION (vizinhança).
+- **TREE**: MEMORY e INTERACTION ligados. **FRACTAL**: 8 geradores (BASE-4, 1/F, RULER e DRAGON adicionados).
+- **HYBRID** (9 linguagens) e **GROOVE MIX** (parceiro escolhido). **GROOVE**: MEMORY e INTERACTION ligados.
+
+## Padrões por compasso (Groove, Motif, Tree e Minimal reescritos)
+
+- **GROOVE / GROOVE MIX**: 64 modelos na grade fina de 24 PPQN (semicolcheias, tercinas ou colcheias). Modelo mais curto que o compasso recomeça a cada compasso; mais longo continua entre compassos. Os 14 modelos escritos em tercinas (SWING RIDE, BEBOP, JAZZ WALTZ, BRUSHES, ODD JAZZ 5, ROCK SHUFFLE, BEMBE 6-8, GNAWA, BELL 12, EUCLID 5-12, EUCLID 7-12, POLY 3-2, POLY 4-3, INTERLOCK) não recebem SWING. Os 8 Materials sem nome na tabela do manual aparecem como MODEL 01, 05, 09, 13, 17, 21, 29 e 53.
+- **MOTIF**: 32 repertórios (CANTABILE ... CINEMATIC), cadeia de 2 a 10 células que começa e termina alinhada ao compasso; determinística.
+- **TREE**: 8 espécies (CANOPY, TENDRIL, ZIGZAG, FERN, CORAL, VINE, FORK, ROOTS).
+- **MINIMAL**: a célula recomeça no início de cada compasso; DENSITY, MEMORY e TENSION conforme o manual.
+
+## Visor azul com páginas
+
+Todas as páginas aparecem dentro do visor azul (HOME, MUSIC, SEQ, MIDI IN, CONTROLS, VISUAL, SETTINGS e PRESETS), com os botões de página no próprio visor. Nada mais abre abaixo da tela. A página HOME traz o mostrador circular, as leituras, a escolha da linguagem composicional e, no GROOVE MIX, o parceiro melódico.
+
+Knobs: o valor acompanha o dedo na hora e o motor recebe a mudança sem esperar o clock.

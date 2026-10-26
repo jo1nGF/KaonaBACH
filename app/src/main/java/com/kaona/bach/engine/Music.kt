@@ -81,22 +81,92 @@ object MaterialCatalog {
     }
 
     private val PROBA = listOf(
-        "PENTATONIC", "DORIAN", "MIXOLYDIAN", "BLUES", "CHROMATIC", "WHOLE TONE", "JAPANESE", "HARM MINOR"
+        "TONAL", "ATONAL", "PENTATONIC", "BLUES", "STEPWISE", "FOURTHS", "OCTATONIC", "PEDAL"
     )
     private val TINTINNABULI = listOf(
-        "ASC STEPWISE", "DESC STEPWISE", "ARC", "PENDULUM", "SPIRAL", "CONVERGING"
+        "ARC UP", "ARC DOWN", "MIRROR UP", "MIRROR DOWN", "WAVE UP", "WAVE DOWN", "ALINA UP", "ALINA DOWN"
     )
     private val MINIMAL = (1..8).map { "CELL $it" }
     private val CELLULAR = (1..254).map { "R%03d".format(it) }
-    private val TREE = listOf(
-        "TREE", "KOCH", "DRAGON", "SIERPINSKI", "PLANT", "ALGAE", "BINARY", "PENROSE", "HILBERT", "LADDER"
+    private val TREE = listOf("CANOPY", "TENDRIL", "ZIGZAG", "FERN", "CORAL", "VINE", "FORK", "ROOTS")
+    private val FRACTAL = listOf(
+        "THUE-MORSE", "LOGISTIC", "BASE-4", "1/F ADDITIVE", "RULER", "SIERPINSKI", "FIBONACCI", "DRAGON"
     )
-    private val FRACTAL = listOf("FIBONACCI", "THUE-MORSE", "SIERPINSKI", "LOGISTIC")
-    private val MOTIF = (1..32).map { "REPERTOIRE %02d".format(it) }
+    private val MOTIF = listOf(
+        "CANTABILE", "ARCH", "STEPWISE", "FOLK", "ARPEGGIO", "CHORALE", "LAMENT", "PEDAL",
+        "RIFF", "OSTINATO", "SYNCOPATED", "WALTZ", "CALL RESPONSE", "MODAL", "DANCE", "WIDE",
+        "NOCTURNE", "HYMN", "BAROQUE", "ROMANTIC", "MINIMAL LINE", "JAZZ LINE", "BLUES LINE", "LATIN LINE",
+        "BOSSA LINE", "ROCK LINE", "AFRO LINE", "BALKAN LINE", "CELTIC LINE", "EASTERN", "IMPRESSIONIST", "CINEMATIC"
+    )
     private val HYBRID = listOf(
         "FUGUE", "CANON", "PROBA", "TINTINA", "MINIMAL", "CELLULAR", "TREE", "FRACTAL", "MOTIF"
     )
-    private val GROOVE = (1..64).map { "MODEL %02d".format(it) }
+    private val GROOVE = listOf(
+        "MODEL 01",
+        "SWING RIDE",
+        "BOSSA NOVA",
+        "AKSAK 5",
+        "MODEL 05",
+        "BEBOP",
+        "SAMBA",
+        "AKSAK 7",
+        "MODEL 09",
+        "JAZZ WALTZ",
+        "SAMBA REGGAE",
+        "AKSAK 9",
+        "MODEL 13",
+        "JAZZ FUNK",
+        "BAIAO",
+        "BALKAN 11",
+        "MODEL 17",
+        "LATIN JAZZ",
+        "MARACATU",
+        "KARSILAMA",
+        "MODEL 21",
+        "BRUSHES",
+        "FREVO",
+        "MALFUF",
+        "DNB HALF",
+        "ODD JAZZ 5",
+        "IJEXA",
+        "MAQSUM",
+        "MODEL 29",
+        "ODD JAZZ 7",
+        "PARTIDO ALTO",
+        "DABKE",
+        "ROCK BASIC",
+        "SON 3-2",
+        "AFROBEAT",
+        "EUCLID 3-8",
+        "ROCK SHUFFLE",
+        "SON 2-3",
+        "HIGHLIFE",
+        "EUCLID 5-8",
+        "FUNK",
+        "RUMBA 3-2",
+        "BEMBE 6-8",
+        "EUCLID 5-12",
+        "FUNK SYNC",
+        "RUMBA 2-3",
+        "BELL 12",
+        "EUCLID 7-12",
+        "SOUL",
+        "MAMBO",
+        "KUKU",
+        "POLY 3-2",
+        "MODEL 53",
+        "SONGO",
+        "GNAWA",
+        "POLY 4-3",
+        "HIP HOP",
+        "REGGAE ONE",
+        "GUMBE",
+        "ROTATING",
+        "NEW",
+        "CALYPSO",
+        "KWAITO",
+        "INTERLOCK"
+    )
 
     fun names(language: CompositionalLanguage): List<String> = when (language) {
         CompositionalLanguage.FUGUE -> FUGUE
@@ -112,28 +182,17 @@ object MaterialCatalog {
         CompositionalLanguage.GROOVE, CompositionalLanguage.GROOVE_MIX -> GROOVE
     }
 
-    /**
-     * Índice do Material para o valor 0-1 do knob. Tintinnabuli e Fractal escolhem por faixas
-     * iguais (limiares); as demais linguagens espalham o knob entre o primeiro e o último.
-     */
+    /** Índice do Material para o valor 0-1 do knob: o knob se espalha do primeiro ao último. */
     fun index(language: CompositionalLanguage, material: Float): Int {
         val n = names(language).size
-        val m = material.coerceIn(0f, 1f)
-        return when (language) {
-            CompositionalLanguage.TINTINNABULI, CompositionalLanguage.FRACTAL ->
-                (m * n).toInt().coerceIn(0, n - 1)
-            else -> (m * (n - 1)).toInt().coerceIn(0, n - 1)
-        }
+        return (material.coerceIn(0f, 1f) * (n - 1)).toInt().coerceIn(0, n - 1)
     }
 
     /** Centro do Material mais próximo: evita deixar o knob sobre a fronteira entre dois Materials. */
     fun center(language: CompositionalLanguage, material: Float): Float {
         val n = names(language).size
         val idx = index(language, material)
-        return when (language) {
-            CompositionalLanguage.TINTINNABULI, CompositionalLanguage.FRACTAL -> (idx + 0.5f) / n
-            else -> if (n <= 1) 0.5f else ((idx + 0.5f) / (n - 1)).coerceAtMost(1f)
-        }
+        return if (n <= 1) 0.5f else ((idx + 0.5f) / (n - 1)).coerceAtMost(1f)
     }
 
     fun name(language: CompositionalLanguage, material: Float): String {

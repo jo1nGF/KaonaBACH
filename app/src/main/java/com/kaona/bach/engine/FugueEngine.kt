@@ -106,7 +106,11 @@ class FugueEngine : CompositionEngine {
             )
 
             // Duration based on section and growth
+            // O ritmo também depende da família do sujeito (MATERIAL)
+            val familyIndex = MaterialCatalog.index(CompositionalLanguage.FUGUE, params.material)
             val baseDuration = when {
+                familyIndex == 7 -> RhythmUtils.HALF // CHORALE: valores longos, de coral
+                familyIndex == 3 -> if (pos % 2 == 0) RhythmUtils.DOTTED_QUARTER else RhythmUtils.EIGHTH // SYNCOPATED
                 params.growth > 0.7f -> RhythmUtils.HALF
                 params.growth > 0.4f -> RhythmUtils.QUARTER
                 else -> RhythmUtils.EIGHTH

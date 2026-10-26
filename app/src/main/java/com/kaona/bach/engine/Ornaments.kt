@@ -49,7 +49,13 @@ class OrnamentProcessor(private val random: Random) {
     fun process(events: List<NoteEvent>, tick: Long, state: EngineState): List<NoteEvent> {
         if (events.isEmpty()) return events
 
-        val amount = state.ornaments
+        // MORPH (PROBA, FRACTAL) e INTERACTION (CANON) também aumentam a chance de ornamentar
+        val boost = when (state.language) {
+            CompositionalLanguage.CANON -> state.params.interaction
+            CompositionalLanguage.PROBA, CompositionalLanguage.FRACTAL -> state.params.morph
+            else -> 0f
+        }
+        val amount = if (state.ornaments > 0f) (state.ornaments + boost * 0.25f).coerceAtMost(1f) else 0f
         if (amount <= 0f) {
             remember(events)
             return events

@@ -2,6 +2,8 @@ package com.kaona.bach.viewmodel
 
 import android.app.Application
 import android.os.Process
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaona.bach.engine.*
@@ -18,8 +20,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -38,6 +39,7 @@ data class SignalSnapshot(
     val pitch: List<SignalState> = List(4) { SignalState() }
 )
 
+@Immutable
 data class UiState(
     val isPlaying: Boolean = false,
     val bpm: Int = 120,
@@ -77,11 +79,14 @@ data class UiState(
     val groovePartner: CompositionalLanguage = CompositionalLanguage.CANON,
     /** 0 = nenhuma; 1 = MUSIC; 2 = MIDI IN; 3 = CONTROLS; 4 = VISUAL */
     val toolPage: Int = 0,
+    /** Página mostrada no visor azul: 0 HOME, 1 MUSIC, 2 SEQ, 3 MIDI IN, 4 CONTROLS, 5 VISUAL, 6 SETTINGS, 7 PRESETS */
+    val page: Int = 0,
     val externalClock: Boolean = false,
     val midiIn: MidiInSettings = MidiInSettings(),
     val learning: MidiCommand? = null
 )
 
+@Stable
 class BachViewModel(application: Application) : AndroidViewModel(application) {
     private val engine = BachEngine()
     private val midiOutput = MidiOutputManager()
@@ -182,6 +187,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLanguage(language: CompositionalLanguage) {
+        markDirty()
         // Ao trocar de algoritmo, MATERIAL volta ao centro da escolha mais próxima
         val centered = MaterialCatalog.center(language, _uiState.value.material)
         engine.setLanguage(language)
@@ -190,37 +196,44 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setBpm(bpm: Int) {
+        markDirty()
         engine.setBpm(bpm)
         _uiState.value = _uiState.value.copy(bpm = bpm.coerceIn(30, 300))
     }
 
     fun setRoot(root: NoteName) {
+        markDirty()
         engine.setRoot(root)
         _uiState.value = _uiState.value.copy(rootNote = root)
         updateMusic { it } // no C6 só a nota C é válida
     }
 
     fun setScale(scale: Scale) {
+        markDirty()
         engine.setScale(scale)
         _uiState.value = _uiState.value.copy(scale = scale)
     }
 
     fun updateParam(param: String, value: Float) {
         engine.updateParam(param, value)
-        _uiState.value = when (param) {
-            "material" -> _uiState.value.copy(material = value)
-            "memory" -> _uiState.value.copy(memory = value)
-            "growth" -> _uiState.value.copy(growth = value)
-            "morph" -> _uiState.value.copy(morph = value)
-            "density" -> _uiState.value.copy(density = value)
-            "tension" -> _uiState.value.copy(tension = value)
-            "interaction" -> _uiState.value.copy(interaction = value)
-            "humanize" -> _uiState.value.copy(humanize = value)
-            else -> _uiState.value
+        markDirty()
+        _uiState.update {
+            when (param) {
+                "material" -> it.copy(material = value)
+                "memory" -> it.copy(memory = value)
+                "growth" -> it.copy(growth = value)
+                "morph" -> it.copy(morph = value)
+                "density" -> it.copy(density = value)
+                "tension" -> it.copy(tension = value)
+                "interaction" -> it.copy(interaction = value)
+                "humanize" -> it.copy(humanize = value)
+                else -> it
+            }
         }
     }
 
     fun setMidiChannel(track: Int, channel: Int) {
+        markDirty()
         engine.setMidiChannel(track, channel)
         val channels = _uiState.value.midiChannels.copyOf()
         channels[track] = channel
@@ -261,6 +274,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         mapIndexed { i, s -> if (hits[i] > 0) SignalState(s.count + hits[i], levels[i]) else s }
 
     private fun applyBreakConfig(character: BreakCharacter, bars: Int, live: Boolean) {
+        markDirty()
         engine.setBreakConfig(BreakConfig(character, bars, live))
         _uiState.update { it.copy(breakCharacter = character, breakBars = bars, breakLive = live) }
     }
@@ -280,20 +294,27 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         applyBreakConfig(ui.breakCharacter, ui.breakBars, true)
     }
 
+    /** Muda a página do visor azul: 0 HOME, 1 MUSIC, 2 SEQ, 3 MIDI IN, 4 CONTROLS, 5 VISUAL, 6 SETTINGS, 7 PRESETS. */
+    fun setPage(page: Int) {
+        _uiState.update { it.copy(page = page.coerceIn(0, 7)) }
+    }
+
     fun toggleSettings() {
-        _uiState.value = _uiState.value.copy(showSettings = !_uiState.value.showSettings)
+        setPage(if (_uiState.value.page == 6) 0 else 6)
     }
 
     fun toggleSequence() {
-        _uiState.update { it.copy(showSequence = !it.showSequence) }
+        setPage(if (_uiState.value.page == 2) 0 else 2)
     }
 
     fun setOrnaments(value: Float) {
+        markDirty()
         engine.setOrnaments(value)
         _uiState.update { it.copy(ornaments = value) }
     }
 
     private fun applySequence(sequence: HarmonicSequence, restart: Boolean = false) {
+        markDirty()
         engine.setSequence(sequence, restart)
         _uiState.update { it.copy(sequence = sequence) }
     }
@@ -324,7 +345,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePresets() {
-        _uiState.value = _uiState.value.copy(showPresets = !_uiState.value.showPresets)
+        setPage(if (_uiState.value.page == 7) 0 else 7)
     }
 
     fun savePreset(index: Int, name: String) {
@@ -341,6 +362,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyPreset(preset: Preset) {
+        markDirty()
         val state = presetManager.presetToEngineState(preset)
         engine.setState(state)
         referenceParams = state.params
@@ -375,6 +397,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     // ---------------- MUSIC, telas e referência dos knobs ----------------
 
     fun updateMusic(transform: (MusicSettings) -> MusicSettings) {
+        markDirty()
         var m = transform(_uiState.value.music)
         m = m.copy(swing = m.swing.coerceIn(0f, 1f), rootOctave = m.rootOctave.coerceIn(1, 6))
         // O alcance do ROOT vai de C1 a C6: no C6 só a nota C é válida
@@ -384,12 +407,21 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setGroovePartner(language: CompositionalLanguage) {
+        markDirty()
         engine.setGroovePartner(language)
         _uiState.update { it.copy(groovePartner = language) }
     }
 
     fun setToolPage(page: Int) {
-        _uiState.update { it.copy(toolPage = if (it.toolPage == page) 0 else page) }
+        // 1 MUSIC, 2 MIDI IN, 3 CONTROLS, 4 VISUAL -> páginas do visor
+        val target = when (page) {
+            1 -> 1
+            2 -> 3
+            3 -> 4
+            4 -> 5
+            else -> 0
+        }
+        setPage(if (_uiState.value.page == target) 0 else target)
     }
 
     /** Clique no knob: volta ao valor de referência (o do preset ou o de fábrica). */
@@ -557,15 +589,22 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** O módulo salva continuamente os ajustes e os retoma ao reiniciar. */
+    private val dirty = MutableStateFlow(0)
+
+    private fun markDirty() {
+        dirty.update { it + 1 }
+    }
+
+    /** O módulo salva os ajustes e os retoma ao reiniciar; só grava depois de 0,8 s sem mudanças. */
     private fun startAutosave() {
         viewModelScope.launch {
-            _uiState
-                .map { presetManager.engineStateToPreset(engine.getState(), it.presetIndex, it.presetName) }
-                .distinctUntilChanged()
-                .collect { preset ->
-                    delay(800)
-                    presetManager.saveAutosave(preset)
-                }
+            dirty.collectLatest {
+                delay(800)
+                val ui = _uiState.value
+                presetManager.saveAutosave(
+                    presetManager.engineStateToPreset(engine.getState(), ui.presetIndex, ui.presetName)
+                )
+            }
         }
     }
 

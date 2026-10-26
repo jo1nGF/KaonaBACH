@@ -387,8 +387,8 @@ fun PresetsPanel(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // Preset grid (show first 32 for usability)
-        for (row in 0..3) {
+        // Grade com os 128 slots (rola dentro do visor)
+        for (row in 0..15) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(3.dp)

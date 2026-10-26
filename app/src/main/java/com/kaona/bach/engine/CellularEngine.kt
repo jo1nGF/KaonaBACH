@@ -25,6 +25,16 @@ class CellularEngine : CompositionEngine {
     private var generationCount: Int = 0
     private var initialized: Boolean = false
     private var cellReadPositions: IntArray = IntArray(4) { 0 }  // Per-voice read position
+    private val freezeRandom = Random(7)
+    private var neighborRadius: Int = 2
+
+    // Cor harmônica de cada regra (R mod 4): OPEN, MIN7, TENSE, MAJ7 (semitons a partir da raiz)
+    private val colorSets = listOf(
+        intArrayOf(0, 7, 12, 5),       // OPEN
+        intArrayOf(0, 3, 7, 10),       // MIN7
+        intArrayOf(0, 1, 6, 10, 11),   // TENSE
+        intArrayOf(0, 4, 7, 11)        // MAJ7
+    )
 
     override fun generate(tick: Long, state: EngineState, random: Random): List<NoteEvent> {
         val params = state.params
@@ -40,6 +50,20 @@ class CellularEngine : CompositionEngine {
         }
 
         val events = mutableListOf<NoteEvent>()
+
+        // MATERIAL escolhe a regra (R001 a R254) e a cor harmônica; a troca vale na hora
+        val rule = 1 + (params.material * 253).toInt().coerceIn(0, 253)
+        if (rule != ruleNumber) {
+            ruleNumber = rule
+            parseRule(rule)
+        }
+
+        // INTERACTION: alarga a vizinhança e aproxima as posições lidas pelas quatro vozes
+        neighborRadius = 2 + (params.interaction * 2f).toInt()
+        val readGap = ((1f - params.interaction) * (gridWidth / 4f)).toInt().coerceAtLeast(1)
+        for (v in 1 until 4) {
+            cellReadPositions[v] = (cellReadPositions[0] + v * readGap) % gridWidth
+        }
 
         // Determine active cell count from density
         val activeCells = getActiveCellCount(params.density)
@@ -67,7 +91,7 @@ class CellularEngine : CompositionEngine {
 
             if (shouldPlay) {
                 val pitchDegree = cellToPitch(cellPos, v, state, params.morph)
-                val midiNote = scaleDegreeToMidi(pitchDegree, state.rootNote, state.scale, v)
+                val midiNote = colorToMidi(pitchDegree, v, state)
 
                 // Velocity from neighborhood density
                 val neighborAlive = countNeighbors(cellPos)
@@ -111,6 +135,7 @@ class CellularEngine : CompositionEngine {
         generationCount = 0
         initialized = false
         cellReadPositions = IntArray(4) { 0 }
+        neighborRadius = 2
     }
 
     // --- Initialization ---
@@ -208,6 +233,11 @@ class CellularEngine : CompositionEngine {
                     (if (right) 1 else 0)
 
             nextGeneration[i] = ruleBits[neighborhood]
+
+            // MEMORY: inércia; uma parte das células mantém o estado anterior
+            if (freezeRandom.nextFloat() < state.params.memory * 0.5f) {
+                nextGeneration[i] = currentGeneration[i]
+            }
         }
 
         // Swap generations
@@ -234,7 +264,7 @@ class CellularEngine : CompositionEngine {
 
     private fun countNeighbors(index: Int): Int {
         var count = 0
-        for (offset in -2..2) {
+        for (offset in -neighborRadius..neighborRadius) {
             if (offset == 0) continue
             if (getCell(index + offset)) count++
         }
@@ -300,6 +330,14 @@ class CellularEngine : CompositionEngine {
         }
 
         return (rootNote.midiValue + (baseOctave + octave) * 12 + semitoneOffset).coerceIn(0, 127)
+    }
+
+    /** Traduz o índice da célula numa nota da cor harmônica da regra, dobrada para a escala. */
+    private fun colorToMidi(index: Int, voice: Int, state: EngineState): Int {
+        val set = colorSets[ruleNumber % 4]
+        val semitones = set[Math.floorMod(index, set.size)]
+        val base = 60 - 12 * voice // soprano a baixo, como antes
+        return state.scale.quantize(state.rootNote.midiBase + base + semitones, state.rootNote).coerceIn(0, 127)
     }
 
     private fun getActiveCellCount(density: Float): Int {
