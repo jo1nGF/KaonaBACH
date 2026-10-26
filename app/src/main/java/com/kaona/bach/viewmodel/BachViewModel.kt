@@ -126,6 +126,13 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
     private var extLastPulseNanos = 0L
     private val commandHigh = BooleanArray(MidiCommand.entries.size)
 
+    /** O módulo salva continuamente os ajustes e os retoma ao reiniciar. */
+    private val dirty = MutableStateFlow(0)
+
+    private fun markDirty() {
+        dirty.update { it + 1 }
+    }
+
     init {
         try {
             presetManager.initFactoryPresets()
@@ -609,22 +616,23 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** O módulo salva continuamente os ajustes e os retoma ao reiniciar. */
-    private val dirty = MutableStateFlow(0)
-
-    private fun markDirty() {
-        dirty.update { it + 1 }
-    }
-
     /** O módulo salva os ajustes e os retoma ao reiniciar; só grava depois de 0,8 s sem mudanças. */
     private fun startAutosave() {
         viewModelScope.launch {
-            dirty.collectLatest {
-                delay(800)
-                val ui = _uiState.value
-                presetManager.saveAutosave(
-                    presetManager.engineStateToPreset(engine.getState(), ui.presetIndex, ui.presetName)
-                )
+            try {
+                dirty.collectLatest {
+                    delay(800)
+                    try {
+                        val ui = _uiState.value
+                        presetManager.saveAutosave(
+                            presetManager.engineStateToPreset(engine.getState(), ui.presetIndex, ui.presetName)
+                        )
+                    } catch (e: Throwable) {
+                        android.util.Log.e("BACH", "Autosave save error", e)
+                    }
+                }
+            } catch (e: Throwable) {
+                android.util.Log.e("BACH", "Autosave coroutine error", e)
             }
         }
     }
