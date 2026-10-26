@@ -117,7 +117,7 @@ class PresetManager(private val context: Context) {
             ),
             rootNote = try { NoteName.valueOf(preset.rootNote) } catch (e: Exception) { NoteName.C },
             scale = try { Scale.valueOf(preset.scaleName) } catch (e: Exception) { Scale.MAJOR },
-            midiChannels = preset.midiChannels.toIntArray(),
+            midiChannels = (preset.midiChannels ?: listOf(1, 2, 3, 4)).toIntArray(),
             breakConfig = BreakConfig(
                 character = try { BreakCharacter.valueOf(preset.breakCharacter) } catch (e: Exception) { BreakCharacter.AUTO },
                 bars = preset.breakBars,
@@ -133,7 +133,7 @@ class PresetManager(private val context: Context) {
             ),
             groovePartner = try { CompositionalLanguage.valueOf(preset.groovePartner) } catch (e: Exception) { CompositionalLanguage.CANON },
             ornaments = preset.ornaments,
-            sequence = HarmonicSequence.decode(preset.sequence, preset.sequenceEnabled)
+            sequence = HarmonicSequence.decode(preset.sequence ?: "", preset.sequenceEnabled)
         )
     }
 

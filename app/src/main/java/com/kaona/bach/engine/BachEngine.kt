@@ -133,6 +133,10 @@ class BachEngine {
     private var breakStartTick: Long = 0
     private var breakEvents = mutableListOf<NoteEvent>()
 
+    // Parâmetros dos 8 knobs: entram sem trava. A interface nunca espera o clock; o valor vale a partir
+    // do próximo tick (menos de 6 ms depois) e getState() já o enxerga.
+    private val pendingParams = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
     fun getState(): EngineState {
         val s = state
         return if (pendingParams.isEmpty()) s else s.copy(params = withPending(s.params, false))
@@ -185,10 +189,6 @@ class BachEngine {
             sequenceOrigin = state.currentTick
         )
     }
-
-    // Parâmetros dos 8 knobs: entram sem trava. A interface nunca espera o clock; o valor vale a partir
-    // do próximo tick (menos de 6 ms depois) e getState() já o enxerga.
-    private val pendingParams = java.util.concurrent.ConcurrentHashMap<String, Float>()
 
     fun updateParam(param: String, value: Float) {
         when (param) {

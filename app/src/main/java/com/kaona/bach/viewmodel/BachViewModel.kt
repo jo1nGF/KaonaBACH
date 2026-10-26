@@ -380,7 +380,7 @@ class BachViewModel(application: Application) : AndroidViewModel(application) {
                 tension = preset.tension,
                 interaction = preset.interaction,
                 humanize = preset.humanize,
-                midiChannels = preset.midiChannels.toIntArray(),
+                midiChannels = (preset.midiChannels ?: listOf(1, 2, 3, 4)).toIntArray(),
                 breakCharacter = state.breakConfig.character,
                 breakBars = preset.breakBars,
                 breakLive = preset.breakLive,

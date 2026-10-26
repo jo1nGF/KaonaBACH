@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer gold ring -->
+    <path
+        android:strokeColor="#D4AF37"
+        android:strokeWidth="2"
+        android:pathData="M 54 26 A 28 28 0 1 0 54 82 A 28 28 0 1 0 54 26 Z"/>
+        
+    <!-- Inner ring -->
+    <path
+        android:strokeColor="#8B7422"
+        android:strokeWidth="1"
+        android:pathData="M 54 34 A 20 20 0 1 0 54 74 A 20 20 0 1 0 54 34 Z"/>
+
+    <!-- 4 Voice dots -->
+    <path
+        android:fillColor="#44FF44"
+        android:pathData="M 54 26 A 3 3 0 1 0 54 20 A 3 3 0 1 0 54 26 Z"/>
+    <path
+        android:fillColor="#4488FF"
+        android:pathData="M 82 54 A 3 3 0 1 0 88 54 A 3 3 0 1 0 82 54 Z"/>
+    <path
+        android:fillColor="#FF8844"
+        android:pathData="M 54 82 A 3 3 0 1 0 54 88 A 3 3 0 1 0 54 82 Z"/>
+    <path
+        android:fillColor="#D4AF37"
+        android:pathData="M 26 54 A 3 3 0 1 0 20 54 A 3 3 0 1 0 26 54 Z"/>
+
+    <!-- Center generative waveform -->
+    <path
+        android:strokeColor="#D4AF37"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 42 54 L 48 44 L 54 64 L 60 46 L 66 54"/>
+</vector>

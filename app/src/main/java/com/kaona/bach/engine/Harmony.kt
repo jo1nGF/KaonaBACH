@@ -91,8 +91,8 @@ data class HarmonicSequence(
     companion object {
         const val SIZE = 64
 
-        fun decode(text: String, enabled: Boolean = true): HarmonicSequence {
-            if (text.isBlank()) return HarmonicSequence(enabled = enabled)
+        fun decode(text: String?, enabled: Boolean = true): HarmonicSequence {
+            if (text.isNullOrBlank()) return HarmonicSequence(enabled = enabled)
             val parsed = text.split(";").take(SIZE).map { part ->
                 try {
                     val f = part.split(".")
